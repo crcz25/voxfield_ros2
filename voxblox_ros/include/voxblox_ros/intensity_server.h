@@ -25,7 +25,7 @@ class IntensityServer : public TsdfServer {
   virtual void updateMesh();
   virtual void publishPointclouds();
 
-  void intensityImageCallback(const sensor_msgs::ImageConstPtr& image);
+  void intensityImageCallback(const sensor_msgs::msg::Image::ConstSharedPtr& image);
 
  protected:
   /// Subscriber for intensity images.

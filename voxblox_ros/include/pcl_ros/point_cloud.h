@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_PCL_ROS_POINT_CLOUD_H_
+#define VOXBLOX_ROS_COMPAT_PCL_ROS_POINT_CLOUD_H_
+
+#include <pcl/point_cloud.h>
+
+#endif  // VOXBLOX_ROS_COMPAT_PCL_ROS_POINT_CLOUD_H_

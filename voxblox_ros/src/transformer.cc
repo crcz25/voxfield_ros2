@@ -1,10 +1,31 @@
 #include "voxblox_ros/transformer.h"
 
-#include <minkindr_conversions/kindr_msg.h>
-#include <minkindr_conversions/kindr_tf.h>
-#include <minkindr_conversions/kindr_xml.h>
+#include <vector>
 
 namespace voxblox {
+namespace {
+
+bool getTransformParam(
+    const ros::NodeHandle& nh_private, const std::string& name,
+    Transformation* transform) {
+  CHECK_NOTNULL(transform);
+  std::vector<double> values;
+  if (!nh_private.getParam(name, values) || values.size() != 16u) {
+    return false;
+  }
+
+  Eigen::Matrix4f matrix = Eigen::Matrix4f::Identity();
+  for (size_t row = 0; row < 4; ++row) {
+    for (size_t col = 0; col < 4; ++col) {
+      matrix(row, col) = static_cast<float>(values[row * 4 + col]);
+    }
+  }
+  *transform = Transformation(matrix);
+  return true;
+}
+
+}  // namespace
+
 // TODO(py): change the name of these transformation, current name
 // is hard to understand
 Transformer::Transformer(
@@ -39,12 +60,8 @@ Transformer::Transformer(
   if (!use_tf_transforms_) {
     transform_sub_ =
         nh_.subscribe("transform", 40, &Transformer::transformCallback, this);
-    // Retrieve T_D_C from params.
-    XmlRpc::XmlRpcValue T_B_D_xml;
     // TODO(helenol): split out into a function to avoid duplication.
-    if (nh_private_.getParam("T_B_D", T_B_D_xml)) {
-      kindr::minimal::xmlRpcToKindr(T_B_D_xml, &T_B_D_);
-
+    if (getTransformParam(nh_private_, "T_B_D", &T_B_D_)) {
       // See if we need to invert it.
       bool invert_static_tranform = false;
       nh_private_.param(
@@ -53,10 +70,7 @@ Transformer::Transformer(
         T_B_D_ = T_B_D_.inverse();
       }
     }
-    XmlRpc::XmlRpcValue T_B_C_xml;
-    if (nh_private_.getParam("T_B_C", T_B_C_xml)) {
-      kindr::minimal::xmlRpcToKindr(T_B_C_xml, &T_B_C_);
-
+    if (getTransformParam(nh_private_, "T_B_C", &T_B_C_)) {
       // See if we need to invert it.
       bool invert_static_tranform = false;
       nh_private_.param(
@@ -70,10 +84,7 @@ Transformer::Transformer(
   // Or we will use tf_transform, we do not need the calibration parameters
   // lookupTransformTf
   // Model transformation
-  XmlRpc::XmlRpcValue T_C_CH_xml;
-  if (nh_private_.getParam("T_C_CH", T_C_CH_xml)) {
-    kindr::minimal::xmlRpcToKindr(T_C_CH_xml, &T_C_CH_);
-
+  if (getTransformParam(nh_private_, "T_C_CH", &T_C_CH_)) {
     // See if we need to invert it.
     bool invert_static_tranform = false;
     nh_private_.param(
@@ -85,7 +96,7 @@ Transformer::Transformer(
 }
 
 void Transformer::transformCallback(
-    const geometry_msgs::TransformStamped& transform_msg) {
+    const geometry_msgs::msg::TransformStamped& transform_msg) {
   transform_queue_.push_back(transform_msg);
 }
 
@@ -113,7 +124,7 @@ bool Transformer::lookupTransformTf(
     const std::string& from_frame, const std::string& to_frame,
     const ros::Time& timestamp, Transformation* transform) {
   CHECK_NOTNULL(transform);
-  tf::StampedTransform tf_transform;
+  geometry_msgs::msg::TransformStamped tf_transform;
   ros::Time time_to_lookup = timestamp;
 
   // Allow overwriting the TF frame for the sensor.
@@ -153,7 +164,7 @@ bool Transformer::lookupTransformQueue(
   }
   // Try to match the transforms in the queue.
   bool match_found = false;
-  std::deque<geometry_msgs::TransformStamped>::iterator it =
+  std::deque<geometry_msgs::msg::TransformStamped>::iterator it =
       transform_queue_.begin();
   for (; it != transform_queue_.end(); ++it) {
     // If the current transform is newer than the requested timestamp, we need

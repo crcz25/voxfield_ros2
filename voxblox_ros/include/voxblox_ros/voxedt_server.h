@@ -66,7 +66,7 @@ class VoxedtServer : public TsdfServer {
   void evalEsdfRefOcc();
 
   // Overwrites the layer with what's coming from the topic!
-  void esdfMapCallback(const voxblox_msgs::Layer& layer_msg);
+  void esdfMapCallback(const voxblox_msgs::msg::Layer& layer_msg);
 
   inline std::shared_ptr<EsdfMap> getEsdfMapPtr() {
     return esdf_map_;
@@ -76,16 +76,16 @@ class VoxedtServer : public TsdfServer {
   }
 
   bool saveEsdfMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
 
   bool saveOccMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
 
   bool saveAllMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
 
   bool getClearSphere() const {
     return clear_sphere_for_planning_;

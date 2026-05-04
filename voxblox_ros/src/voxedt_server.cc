@@ -69,7 +69,7 @@ void VoxedtServer::setupRos() {
           "esdf_error_slice", 1, true);
 
   esdf_map_pub_ =
-      nh_private_.advertise<voxblox_msgs::Layer>("esdf_map_out", 1, false);
+      nh_private_.advertise<voxblox_msgs::msg::Layer>("esdf_map_out", 1, false);
 
   // Set up subscriber.
   esdf_map_sub_ = nh_private_.subscribe(
@@ -165,8 +165,8 @@ void VoxedtServer::visualizeEsdfError() {
 }
 
 // bool VoxedtServer::generateEsdfCallback(
-//     std_srvs::Empty::Request& /*request*/,      // NOLINT
-//     std_srvs::Empty::Response& /*response*/) {  // NOLINT
+//     std_srvs::srv::Empty::Request& /*request*/,      // NOLINT
+//     std_srvs::srv::Empty::Response& /*response*/) {  // NOLINT
 //   const bool clear_esdf = true;
 //   if (clear_esdf) {
 //     esdf_integrator_->updateFromTsdfLayerBatch();
@@ -180,19 +180,19 @@ void VoxedtServer::visualizeEsdfError() {
 // }
 
 bool VoxedtServer::saveAllMapCallback(
-    voxblox_msgs::FilePath::Request& request, voxblox_msgs::FilePath::Response&
+    voxblox_msgs::srv::FilePath::Request& request, voxblox_msgs::srv::FilePath::Response&
     /*response*/) {  // NOLINT
   return saveAllMap(request.file_path);
 }
 
 bool VoxedtServer::saveEsdfMapCallback(
-    voxblox_msgs::FilePath::Request& request, voxblox_msgs::FilePath::Response&
+    voxblox_msgs::srv::FilePath::Request& request, voxblox_msgs::srv::FilePath::Response&
     /*response*/) {  // NOLINT
   return saveEsdfMap(request.file_path);
 }
 
 bool VoxedtServer::saveOccMapCallback(
-    voxblox_msgs::FilePath::Request& request, voxblox_msgs::FilePath::Response&
+    voxblox_msgs::srv::FilePath::Request& request, voxblox_msgs::srv::FilePath::Response&
     /*response*/) {  // NOLINT
   return saveOccMap(request.file_path);
 }
@@ -215,7 +215,7 @@ void VoxedtServer::evalEsdfEvent(const ros::TimerEvent& /*event*/) {
 
 void VoxedtServer::publishOccupancyOccupiedNodes() {
   // Create a pointcloud with elevation = intensity.
-  visualization_msgs::MarkerArray marker_array;
+  visualization_msgs::msg::MarkerArray marker_array;
   createOccupancyBlocksFromOccupancyLayer(
       occupancy_map_->getOccupancyLayer(), world_frame_, &marker_array);
   occupancy_marker_pub_.publish(marker_array);
@@ -256,7 +256,7 @@ void VoxedtServer::publishMap(bool reset_remote_map) {
     }
     const bool only_updated = !reset_remote_map;
     timing::Timer publish_map_timer("map/publish_esdf");
-    voxblox_msgs::Layer layer_msg;
+    voxblox_msgs::msg::Layer layer_msg;
     serializeLayerAsMsg<EsdfVoxel>(
         this->esdf_map_->getEsdfLayer(), only_updated, &layer_msg);
     if (reset_remote_map) {
@@ -510,7 +510,7 @@ void VoxedtServer::newPoseCallback(const Transformation& T_G_C) {
 //   block_remove_timer.Stop();
 // }
 
-void VoxedtServer::esdfMapCallback(const voxblox_msgs::Layer& layer_msg) {
+void VoxedtServer::esdfMapCallback(const voxblox_msgs::msg::Layer& layer_msg) {
   timing::Timer receive_map_timer("map/receive_esdf");
 
   bool success =

@@ -24,7 +24,7 @@ class Transformer {
       const std::string& from_frame, const std::string& to_frame,
       const ros::Time& timestamp, Transformation* transform);
 
-  void transformCallback(const geometry_msgs::TransformStamped& transform_msg);
+  void transformCallback(const geometry_msgs::msg::TransformStamped& transform_msg);
 
   Transformation getStaticTransform();
 
@@ -82,7 +82,7 @@ class Transformer {
   ros::Subscriber transform_sub_;
 
   // l Transform queue, used only when use_tf_transforms is false.
-  AlignedDeque<geometry_msgs::TransformStamped> transform_queue_;
+  AlignedDeque<geometry_msgs::msg::TransformStamped> transform_queue_;
 };
 
 }  // namespace voxblox

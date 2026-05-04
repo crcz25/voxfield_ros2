@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_FILE_PATH_H_
+#define VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_FILE_PATH_H_
+
+#include <voxblox_msgs/srv/file_path.hpp>
+
+#endif  // VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_FILE_PATH_H_

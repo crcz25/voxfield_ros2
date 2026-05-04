@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_LAYER_H_
+#define VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_LAYER_H_
+
+#include <voxblox_msgs/msg/layer.hpp>
+
+#endif  // VOXBLOX_ROS_COMPAT_VOXBLOX_MSGS_LAYER_H_

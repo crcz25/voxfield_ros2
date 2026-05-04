@@ -1,85 +1,110 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.16)
 project(voxblox_ros)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(catkin_simple REQUIRED)
-catkin_simple(ALL_DEPS_REQUIRED)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra)
+endif()
 
-add_definitions(-std=c++14 -Wall -Wextra)
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(voxblox REQUIRED)
+find_package(voxblox_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common filters kdtree)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(gflags REQUIRED)
+find_package(glog REQUIRED)
 
-#############
-# LIBRARIES #
-#############
-cs_add_library(${PROJECT_NAME}
-  src/interactive_slider.cc
-  src/simulation_server.cc
-  src/intensity_server.cc
+if(TARGET gflags::gflags)
+  set(GFLAGS_TARGET gflags::gflags)
+else()
+  set(GFLAGS_TARGET gflags)
+endif()
+
+if(TARGET glog::glog)
+  set(GLOG_TARGET glog::glog)
+else()
+  set(GLOG_TARGET glog)
+endif()
+
+add_library(${PROJECT_NAME}
   src/transformer.cc
-  src/tsdf_server.cc
   src/np_tsdf_server.cc
   src/voxfield_server.cc
-  src/voxblox_server.cc
-  src/voxedt_server.cc
-  src/fiesta_server.cc
 )
 
-############
-# BINARIES #
-############
-
-cs_add_executable(voxblox_eval
-  src/voxblox_eval.cc
+target_include_directories(${PROJECT_NAME}
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+    ${PCL_INCLUDE_DIRS}
+    ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(voxblox_eval ${PROJECT_NAME})
 
-cs_add_executable(tsdf_server
-  src/tsdf_server_node.cc
+ament_target_dependencies(${PROJECT_NAME}
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+  std_msgs
+  std_srvs
+  tf2
+  tf2_ros
+  pcl_conversions
+  voxblox
+  voxblox_msgs
 )
-target_link_libraries(tsdf_server ${PROJECT_NAME})
 
-cs_add_executable(np_tsdf_server
-  src/np_tsdf_server_node.cc
+target_link_libraries(${PROJECT_NAME}
+  Eigen3::Eigen
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  ${GLOG_TARGET}
+  ${GFLAGS_TARGET}
 )
-target_link_libraries(np_tsdf_server ${PROJECT_NAME})
 
-cs_add_executable(intensity_server
-  src/intensity_server_node.cc
+add_executable(np_tsdf_server src/np_tsdf_server_node.cc)
+target_link_libraries(np_tsdf_server PRIVATE ${PROJECT_NAME})
+
+add_executable(voxfield_server src/voxfield_server_node.cc)
+target_link_libraries(voxfield_server PRIVATE ${PROJECT_NAME})
+
+install(
+  TARGETS ${PROJECT_NAME} np_tsdf_server voxfield_server
+  EXPORT export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
-target_link_libraries(intensity_server ${PROJECT_NAME})
 
-cs_add_executable(simulation_eval
-  src/simulation_eval.cc
+install(DIRECTORY include/ DESTINATION include/${PROJECT_NAME})
+install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
+
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  visualization_msgs
+  std_msgs
+  std_srvs
+  tf2
+  tf2_ros
+  pcl_conversions
+  voxblox
+  voxblox_msgs
 )
-target_link_libraries(simulation_eval ${PROJECT_NAME})
 
-cs_add_executable(visualize_tsdf
-  src/visualize_tsdf.cc
-)
-target_link_libraries(visualize_tsdf ${PROJECT_NAME})
-
-cs_add_executable(voxfield_server
-  src/voxfield_server_node.cc
-)
-target_link_libraries(voxfield_server ${PROJECT_NAME})
-
-cs_add_executable(voxblox_server
-  src/voxblox_server_node.cc
-)
-target_link_libraries(voxblox_server ${PROJECT_NAME})
-
-cs_add_executable(fiesta_server
-  src/fiesta_server_node.cc
-)
-target_link_libraries(fiesta_server ${PROJECT_NAME})
-
-cs_add_executable(voxedt_server
-  src/voxedt_server_node.cc
-)
-target_link_libraries(voxedt_server ${PROJECT_NAME})
-
-##########
-# EXPORT #
-##########
-cs_install()
-cs_export()
+ament_package()

@@ -29,7 +29,7 @@ class InteractiveSlider {
 
   /// Processes the feedback after moving the slider.
   virtual void interactiveMarkerFeedback(
-      const visualization_msgs::InteractiveMarkerFeedbackConstPtr& feedback,
+      const visualization_msgs::msg::InteractiveMarkerFeedbackConstPtr& feedback,
       const std::function<void(const double slice_level)>& slider_callback);
 };
 

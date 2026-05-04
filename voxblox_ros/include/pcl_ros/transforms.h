@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_PCL_ROS_TRANSFORMS_H_
+#define VOXBLOX_ROS_COMPAT_PCL_ROS_TRANSFORMS_H_
+
+#include <pcl/common/transforms.h>
+
+#endif  // VOXBLOX_ROS_COMPAT_PCL_ROS_TRANSFORMS_H_

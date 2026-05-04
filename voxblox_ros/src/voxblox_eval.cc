@@ -1,8 +1,6 @@
 #include <deque>
 
 #include <gflags/gflags.h>
-#include <minkindr_conversions/kindr_msg.h>
-#include <minkindr_conversions/kindr_tf.h>
 #include <minkindr_conversions/kindr_xml.h>
 #include <pcl/conversions.h>
 #include <pcl/filters/filter.h>
@@ -191,7 +189,7 @@ VoxbloxEvaluator::VoxbloxEvaluator(
   // If doing visualizations, initialize the publishers.
   if (visualize_) {
     mesh_pub_ =
-        nh_private_.advertise<visualization_msgs::MarkerArray>("mesh", 1, true);
+        nh_private_.advertise<visualization_msgs::msg::MarkerArray>("mesh", 1, true);
     gt_ptcloud_pub_ = nh_private_.advertise<pcl::PointCloud<pcl::PointXYZRGB>>(
         "gt_ptcloud", 1, true);
     esdf_error_slice_pub_ =
@@ -430,7 +428,7 @@ void VoxbloxEvaluator::visualize() {
   mesh_integrator_->generateMesh(only_mesh_updated_blocks, clear_updated_flag);
 
   // Publish mesh.
-  visualization_msgs::MarkerArray marker_array;
+  visualization_msgs::msg::MarkerArray marker_array;
   marker_array.markers.resize(1);
   marker_array.markers[0].header.frame_id = frame_id_;
   fillMarkerWithMesh(mesh_layer_, color_mode_, &marker_array.markers[0]);

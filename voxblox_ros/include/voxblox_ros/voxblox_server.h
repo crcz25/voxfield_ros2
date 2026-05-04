@@ -29,8 +29,8 @@ class VoxbloxServer : public TsdfServer {
   virtual ~VoxbloxServer() {}
 
   bool generateEsdfCallback(
-      std_srvs::Empty::Request& request,     // NOLINT
-      std_srvs::Empty::Response& response);  // NOLINT
+      std_srvs::srv::Empty::Request& request,     // NOLINT
+      std_srvs::srv::Empty::Response& response);  // NOLINT
 
   void publishAllUpdatedEsdfVoxels();
   virtual void publishSlices();
@@ -52,11 +52,11 @@ class VoxbloxServer : public TsdfServer {
   void updateEsdfBatch(bool full_euclidean = false);
 
   // Overwrites the layer with what's coming from the topic!
-  void esdfMapCallback(const voxblox_msgs::Layer& layer_msg);
+  void esdfMapCallback(const voxblox_msgs::msg::Layer& layer_msg);
 
   bool saveEsdfMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
 
   inline std::shared_ptr<EsdfMap> getEsdfMapPtr() {
     return esdf_map_;

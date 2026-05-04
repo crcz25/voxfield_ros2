@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_STD_MSGS_COLOR_RGBA_H_
+#define VOXBLOX_ROS_COMPAT_STD_MSGS_COLOR_RGBA_H_
+
+#include <std_msgs/msg/color_rgba.hpp>
+
+#endif  // VOXBLOX_ROS_COMPAT_STD_MSGS_COLOR_RGBA_H_

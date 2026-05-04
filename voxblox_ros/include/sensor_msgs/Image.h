@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_SENSOR_MSGS_IMAGE_H_
+#define VOXBLOX_ROS_COMPAT_SENSOR_MSGS_IMAGE_H_
+
+#include <sensor_msgs/msg/image.hpp>
+
+#endif  // VOXBLOX_ROS_COMPAT_SENSOR_MSGS_IMAGE_H_

@@ -48,13 +48,13 @@ class TsdfServer {
 
   void getServerConfigFromRosParam(const ros::NodeHandle& nh_private);
 
-  void insertPointcloud(const sensor_msgs::PointCloud2::Ptr& pointcloud);
+  void insertPointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud);
 
   void insertFreespacePointcloud(
-      const sensor_msgs::PointCloud2::Ptr& pointcloud);
+      const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud);
 
   virtual void processPointCloudMessageAndInsert(
-      const sensor_msgs::PointCloud2::Ptr& pointcloud_msg,
+      const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg,
       const Transformation& T_G_C, const bool is_freespace_pointcloud);
 
   void integratePointcloud(
@@ -81,23 +81,23 @@ class TsdfServer {
   virtual bool loadMap(const std::string& file_path);
 
   bool clearMapCallback(
-      std_srvs::Empty::Request& request,     // NOLINT
-      std_srvs::Empty::Response& response);  // NOLINT
+      std_srvs::srv::Empty::Request& request,     // NOLINT
+      std_srvs::srv::Empty::Response& response);  // NOLINT
   bool saveMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
   bool loadMapCallback(
-      voxblox_msgs::FilePath::Request& request,     // NOLINT
-      voxblox_msgs::FilePath::Response& response);  // NOLINT
+      voxblox_msgs::srv::FilePath::Request& request,     // NOLINT
+      voxblox_msgs::srv::FilePath::Response& response);  // NOLINT
   bool generateMeshCallback(
-      std_srvs::Empty::Request& request,     // NOLINT
-      std_srvs::Empty::Response& response);  // NOLINT
+      std_srvs::srv::Empty::Request& request,     // NOLINT
+      std_srvs::srv::Empty::Response& response);  // NOLINT
   bool publishPointcloudsCallback(
-      std_srvs::Empty::Request& request,     // NOLINT
-      std_srvs::Empty::Response& response);  // NOLINT
+      std_srvs::srv::Empty::Request& request,     // NOLINT
+      std_srvs::srv::Empty::Response& response);  // NOLINT
   bool publishTsdfMapCallback(
-      std_srvs::Empty::Request& request,     // NOLINT
-      std_srvs::Empty::Response& response);  // NOLINT
+      std_srvs::srv::Empty::Request& request,     // NOLINT
+      std_srvs::srv::Empty::Response& response);  // NOLINT
 
   void updateMeshEvent(const ros::TimerEvent& event);
   void publishMapEvent(const ros::TimerEvent& event);
@@ -138,7 +138,7 @@ class TsdfServer {
   void publishRobotMesh(const Transformation& T_G_C);
 
   /// Overwrites the layer with what's coming from the topic!
-  void tsdfMapCallback(const voxblox_msgs::Layer& layer_msg);
+  void tsdfMapCallback(const voxblox_msgs::msg::Layer& layer_msg);
 
  protected:
   /**
@@ -146,8 +146,8 @@ class TsdfServer {
    * the queue.
    */
   bool getNextPointcloudFromQueue(
-      std::queue<sensor_msgs::PointCloud2::Ptr>* queue,
-      sensor_msgs::PointCloud2::Ptr* pointcloud_msg, Transformation* T_G_C);
+      std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
+      sensor_msgs::msg::PointCloud2::SharedPtr* pointcloud_msg, Transformation* T_G_C);
 
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
@@ -274,7 +274,7 @@ class TsdfServer {
   std::shared_ptr<MeshLayer> mesh_layer_;
   std::unique_ptr<MeshIntegrator<TsdfVoxel>> mesh_integrator_;
   /// Optionally cached mesh message.
-  voxblox_msgs::Mesh cached_mesh_msg_;
+  voxblox_msgs::msg::Mesh cached_mesh_msg_;
 
   /**
    * Transformer object to keep track of either TF transforms or messages from
@@ -285,8 +285,8 @@ class TsdfServer {
    * Queue of incoming pointclouds, in case the transforms can't be immediately
    * resolved.
    */
-  std::queue<sensor_msgs::PointCloud2::Ptr> pointcloud_queue_;
-  std::queue<sensor_msgs::PointCloud2::Ptr> freespace_pointcloud_queue_;
+  std::queue<sensor_msgs::msg::PointCloud2::SharedPtr> pointcloud_queue_;
+  std::queue<sensor_msgs::msg::PointCloud2::SharedPtr> freespace_pointcloud_queue_;
 
   // Last message times for throttling input.
   ros::Time last_msg_time_ptcloud_;

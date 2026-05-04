@@ -1,0 +1,6 @@
+#ifndef VOXBLOX_ROS_COMPAT_NODE_HANDLE_H_
+#define VOXBLOX_ROS_COMPAT_NODE_HANDLE_H_
+
+#include <ros/ros.h>
+
+#endif  // VOXBLOX_ROS_COMPAT_NODE_HANDLE_H_

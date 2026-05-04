@@ -8,7 +8,7 @@ namespace voxblox {
 template <typename VoxelType>
 void serializeLayerAsMsg(
     const Layer<VoxelType>& layer, const bool only_updated,
-    voxblox_msgs::Layer* msg, const MapDerializationAction& action) {
+    voxblox_msgs::msg::Layer* msg, const MapDerializationAction& action) {
   CHECK_NOTNULL(msg);
   msg->voxels_per_side = layer.voxels_per_side();
   msg->voxel_size = layer.voxel_size();
@@ -24,7 +24,7 @@ void serializeLayerAsMsg(
 
   msg->action = static_cast<uint8_t>(action);
 
-  voxblox_msgs::Block block_msg;
+  voxblox_msgs::msg::Block block_msg;
   msg->blocks.reserve(block_list.size());
   for (const BlockIndex& index : block_list) {
     block_msg.x_index = index.x();
@@ -41,7 +41,7 @@ void serializeLayerAsMsg(
 
 template <typename VoxelType>
 bool deserializeMsgToLayer(
-    const voxblox_msgs::Layer& msg, Layer<VoxelType>* layer) {
+    const voxblox_msgs::msg::Layer& msg, Layer<VoxelType>* layer) {
   CHECK_NOTNULL(layer);
   return deserializeMsgToLayer<VoxelType>(
       msg, static_cast<MapDerializationAction>(msg.action), layer);
@@ -49,7 +49,7 @@ bool deserializeMsgToLayer(
 
 template <typename VoxelType>
 bool deserializeMsgToLayer(
-    const voxblox_msgs::Layer& msg, const MapDerializationAction& action,
+    const voxblox_msgs::msg::Layer& msg, const MapDerializationAction& action,
     Layer<VoxelType>* layer) {
   CHECK_NOTNULL(layer);
   if (getVoxelType<VoxelType>().compare(msg.layer_type) != 0) {
@@ -70,7 +70,7 @@ bool deserializeMsgToLayer(
     layer->removeAllBlocks();
   }
 
-  for (const voxblox_msgs::Block& block_msg : msg.blocks) {
+  for (const voxblox_msgs::msg::Block& block_msg : msg.blocks) {
     BlockIndex index(block_msg.x_index, block_msg.y_index, block_msg.z_index);
 
     // Either we want to update an existing block or there was no block there
