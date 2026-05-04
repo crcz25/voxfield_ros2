@@ -3,17 +3,18 @@
 
 #include <limits>
 #include <map>
+#include <memory>
 #include <string>
 
-#include <OGRE/OgreManualObject.h>
+#include <OgreManualObject.h>
 
 #include <voxblox/core/block_hash.h>
-#include <voxblox_msgs/Mesh.h>
-#include <voxblox_msgs/MultiMesh.h>
+#include <voxblox_msgs/msg/mesh.hpp>
+#include <voxblox_msgs/msg/mesh_block.hpp>
 
 namespace voxblox_rviz_plugin {
 
-/// Visualizes a single voxblox_msgs::Mesh message.
+/// Visualizes a single voxblox_msgs::msg::Mesh message.
 class VoxbloxMeshVisual {
  public:
   VoxbloxMeshVisual(
@@ -22,7 +23,7 @@ class VoxbloxMeshVisual {
   virtual ~VoxbloxMeshVisual();
 
   void setMessage(
-      const voxblox_msgs::Mesh::ConstPtr& msg,
+      voxblox_msgs::msg::Mesh::ConstSharedPtr msg,
       uint8_t alpha = std::numeric_limits<uint8_t>::max());
 
   // enable / disable visibility

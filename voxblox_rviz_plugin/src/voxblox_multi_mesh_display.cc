@@ -1,10 +1,12 @@
 #include "voxblox_rviz_plugin/voxblox_multi_mesh_display.h"
 
-#include <OGRE/OgreSceneManager.h>
-#include <OGRE/OgreSceneNode.h>
+#include <OgreSceneManager.h>
+#include <OgreSceneNode.h>
 
-#include <rviz/visualization_manager.h>
-#include <tf/transform_listener.h>
+#include <rviz_common/display_context.hpp>
+#include <rviz_common/frame_manager_iface.hpp>
+#include <rviz_common/properties/int_property.hpp>
+#include <rviz_common/properties/status_property.hpp>
 
 #include "voxblox_rviz_plugin/material_loader.h"
 
@@ -38,7 +40,7 @@ void VoxbloxMultiMeshDisplay::updateVisible() {
     }
     ns_visual_pair.second.setEnabled(visible);
     if (visible) {
-      updateTransformation(&(ns_visual_pair.second), ros::Time::now());
+      updateTransformation(&(ns_visual_pair.second));
     }
   }
 }
@@ -53,7 +55,7 @@ void VoxbloxMultiMeshDisplay::toggleVisibilityAllSLOT() {
 }
 
 void VoxbloxMultiMeshDisplay::processMessage(
-    const voxblox_msgs::MultiMesh::ConstPtr& msg) {
+    voxblox_msgs::msg::MultiMesh::ConstSharedPtr msg) {
   // Select the matching visual
   auto it = visuals_.find(msg->name_space);
   if (msg->mesh.mesh_blocks.empty()) {
@@ -76,7 +78,8 @@ void VoxbloxMultiMeshDisplay::processMessage(
 
     // update the frame, pose and mesh of the visual.
     it->second.setFrameId(msg->header.frame_id);
-    if (updateTransformation(&(it->second), msg->header.stamp)) {
+    if (updateTransformation(
+            &(it->second), rclcpp::Time(msg->header.stamp, RCL_ROS_TIME))) {
       // here we use the multi-mesh msg header.
       // catch uninitialized alpha values, since nobody wants to display a
       // completely invisible mesh.
@@ -86,7 +89,7 @@ void VoxbloxMultiMeshDisplay::processMessage(
       }
 
       // convert to normal mesh msg for visual
-      voxblox_msgs::MeshPtr mesh(new voxblox_msgs::Mesh);
+      auto mesh = std::make_shared<voxblox_msgs::msg::Mesh>();
       *mesh = msg->mesh;
       it->second.setMessage(mesh, alpha);
     }
@@ -94,22 +97,43 @@ void VoxbloxMultiMeshDisplay::processMessage(
 }
 
 bool VoxbloxMultiMeshDisplay::updateTransformation(
-    VoxbloxMeshVisual* visual, ros::Time stamp) {
+    VoxbloxMeshVisual* visual) {
+  // Look up the transform from tf. If it doesn't work we have to skip.
+  Ogre::Quaternion orientation;
+  Ogre::Vector3 position;
+  if (!context_->getFrameManager()->getTransform(
+          visual->getFrameId(), position, orientation)) {
+    setStatus(
+        rviz_common::properties::StatusProperty::Error, "Transform",
+        QString("Error transforming from frame '%1' to frame '%2'")
+            .arg(QString::fromStdString(visual->getFrameId()), fixed_frame_));
+    return false;
+  }
+  visual->setPose(position, orientation);
+  setStatus(rviz_common::properties::StatusProperty::Ok, "Transform", "OK");
+  return true;
+}
+
+bool VoxbloxMultiMeshDisplay::updateTransformation(
+    VoxbloxMeshVisual* visual, rclcpp::Time stamp) {
   // Look up the transform from tf. If it doesn't work we have to skip.
   Ogre::Quaternion orientation;
   Ogre::Vector3 position;
   if (!context_->getFrameManager()->getTransform(
           visual->getFrameId(), stamp, position, orientation)) {
-    ROS_DEBUG(
-        "Error transforming from frame '%s' to frame '%s'",
-        visual->getFrameId().c_str(), qPrintable(fixed_frame_));
+    setStatus(
+        rviz_common::properties::StatusProperty::Error, "Transform",
+        QString("Error transforming from frame '%1' to frame '%2'")
+            .arg(QString::fromStdString(visual->getFrameId()), fixed_frame_));
     return false;
   }
   visual->setPose(position, orientation);
+  setStatus(rviz_common::properties::StatusProperty::Ok, "Transform", "OK");
   return true;
 }
 
 void VoxbloxMultiMeshDisplay::update(float wall_dt, float ros_dt) {
+  (void)ros_dt;
   constexpr float kMinUpdateDt = 1e-1;
   dt_since_last_update_ += wall_dt;
   if (isEnabled() && kMinUpdateDt < dt_since_last_update_) {
@@ -120,50 +144,27 @@ void VoxbloxMultiMeshDisplay::update(float wall_dt, float ros_dt) {
 
 void VoxbloxMultiMeshDisplay::updateAllTransformations() {
   for (auto& visual : visuals_) {
-    updateTransformation(&(visual.second), ros::Time::now());
+    updateTransformation(&(visual.second));
   }
 }
 
 void VoxbloxMultiMeshDisplay::fixedFrameChanged() {
-  tf_filter_->setTargetFrame(fixed_frame_.toStdString());
+  if (tf_filter_) {
+    tf_filter_->setTargetFrame(fixed_frame_.toStdString());
+  }
   // update the transformation of the visuals w.r.t fixed frame
   updateAllTransformations();
 }
 
-void VoxbloxMultiMeshDisplay::subscribe() {
-  // Override this to allow for custom queue size, the rest is taken from
-  // rviz::MessageFilterDisplay.
-  if (!isEnabled()) {
-    return;
-  }
-  try {
-    ros::TransportHints transport_hint = ros::TransportHints().reliable();
-    // Determine UDP vs TCP transport for user selection.
-    if (unreliable_property_->getBool()) {
-      transport_hint = ros::TransportHints().unreliable();
-    }
-    sub_.subscribe(
-        update_nh_, topic_property_->getTopicStd(), kSubscriberQueueLength,
-        transport_hint);
-    setStatus(rviz::StatusProperty::Ok, "Topic", "OK");
-  } catch (ros::Exception& e) {
-    setStatus(
-        rviz::StatusProperty::Error, "Topic",
-        QString("Error subscribing: ") + e.what());
-  }
-}
-
 void VoxbloxMultiMeshDisplay::onInitialize() {
-  // Override this to allow for custom queue size, the rest is taken from
-  // rviz::MessageFilterDisplay.
-  MessageFilterDisplay::onInitialize();
-  tf_filter_->setQueueSize(kSubscriberQueueLength);
+  MFDClass::onInitialize();
+  message_queue_property_->setInt(kSubscriberQueueLength);
 }
 
 VisibilityField::VisibilityField(
-    const std::string& name, rviz::BoolProperty* parent,
+    const std::string& name, rviz_common::properties::BoolProperty* parent,
     VoxbloxMultiMeshDisplay* master)
-    : rviz::BoolProperty(
+    : rviz_common::properties::BoolProperty(
           name.c_str(), true,
           "Show or hide the mesh. If the mesh is hidden but not disabled, it "
           "will persist and is incrementally built in the background.",
@@ -262,6 +263,6 @@ void VisibilityField::setEnabledForAll(bool enabled) {
 
 }  // namespace voxblox_rviz_plugin
 
-#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_list_macros.hpp>
 PLUGINLIB_EXPORT_CLASS(
-    voxblox_rviz_plugin::VoxbloxMultiMeshDisplay, rviz::Display)
+    voxblox_rviz_plugin::VoxbloxMultiMeshDisplay, rviz_common::Display)

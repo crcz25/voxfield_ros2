@@ -1,7 +1,7 @@
 #include "voxblox_rviz_plugin/material_loader.h"
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <OgreResourceGroupManager.h>
-#include <ros/package.h>
 
 namespace voxblox_rviz_plugin {
 
@@ -14,7 +14,8 @@ void MaterialLoader::loadMaterials() {
   // first instance loads a custom ogre material that supports transparent
   // colors.
   std::string path =
-      ros::package::getPath("voxblox_rviz_plugin") + "/content/materials";
+      ament_index_cpp::get_package_share_directory("voxblox_rviz_plugin") +
+      "/content/materials";
   Ogre::ResourceGroupManager::getSingletonPtr()->createResourceGroup(
       "VoxbloxMaterials");
   Ogre::ResourceGroupManager::getSingleton().addResourceLocation(

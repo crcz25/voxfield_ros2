@@ -2,8 +2,8 @@
 
 #include <limits>
 
-#include <OGRE/OgreSceneManager.h>
-#include <OGRE/OgreSceneNode.h>
+#include <OgreSceneManager.h>
+#include <OgreSceneNode.h>
 
 #include <voxblox/mesh/mesh_utils.h>
 
@@ -35,10 +35,23 @@ void VoxbloxMeshVisual::setPose(
 }
 
 void VoxbloxMeshVisual::setMessage(
-    const voxblox_msgs::Mesh::ConstPtr& msg, uint8_t alpha) {
-  for (const voxblox_msgs::MeshBlock& mesh_block : msg->mesh_blocks) {
+    voxblox_msgs::msg::Mesh::ConstSharedPtr msg, uint8_t alpha) {
+  for (const voxblox_msgs::msg::MeshBlock& mesh_block : msg->mesh_blocks) {
     const voxblox::BlockIndex index(
         mesh_block.index[0], mesh_block.index[1], mesh_block.index[2]);
+    auto existing_it = object_map_.find(index);
+    if (mesh_block.x.empty()) {
+      if (existing_it != object_map_.end()) {
+        scene_manager_->destroyManualObject(existing_it->second);
+        object_map_.erase(existing_it);
+      }
+      continue;
+    }
+    if (mesh_block.x.size() != mesh_block.y.size() ||
+        mesh_block.x.size() != mesh_block.z.size() ||
+        mesh_block.x.size() % 3u != 0u) {
+      continue;
+    }
 
     size_t vertex_index = 0u;
     voxblox::Mesh mesh;
@@ -113,13 +126,6 @@ void VoxbloxMeshVisual::setMessage(
     const voxblox::AnyIndexHashMapType<
         Ogre::ManualObject*>::type::const_iterator it = object_map_.find(index);
     if (it != object_map_.end()) {
-      // delete empty mesh blocks
-      if (mesh_block.x.size() == 0) {
-        scene_manager_->destroyManualObject(it->second);
-        object_map_.erase(it);
-        continue;
-      }
-
       ogre_object = it->second;
       ogre_object->clear();
     } else {
@@ -136,7 +142,9 @@ void VoxbloxMeshVisual::setMessage(
       frame_node_->attachObject(ogre_object);
     }
 
-    DCHECK(ogre_object != nullptr);
+    if (ogre_object == nullptr) {
+      continue;
+    }
 
     ogre_object->estimateVertexCount(connected_mesh.vertices.size());
     ogre_object->estimateIndexCount(connected_mesh.indices.size());
