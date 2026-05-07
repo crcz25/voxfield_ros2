@@ -1,4 +1,4 @@
-This repository represents the official implementation of the paper:
+ This repository represents the official implementation of the paper and it was ported to ROS 2 with help of Codex. It is mostly shims and wrappers around the original ROS1 code and not all of the servers are ported yet, but the core mapping functionality is working and can be used as a drop-in replacement.
 
 ## Voxfield: Non-Projective Signed Distance Fields for Online Planning and 3D Reconstruction
 
@@ -12,14 +12,14 @@ This repository represents the official implementation of the paper:
 
 ---
 
-Voxfield is an improved version of the volumetric mapping framework [**Voxblox**](https://github.com/ethz-asl/voxblox) on both the mapping accuracy and efficiency. 
+Voxfield is an improved version of the volumetric mapping framework [**Voxblox**](https://github.com/ethz-asl/voxblox) on both the mapping accuracy and efficiency.
 Voxfield is heavily based on the original [**Voxblox**](https://github.com/ethz-asl/voxblox) implementation, with the additional capacity of a non-projective TSDF integration and an efficient ESDF integration based on TSDF map. The constructed TSDF and ESDF map can be used for 3D reconstruction and robot path planning in real-time.
 
 This repository also provides the implementation of other state-of-the-art methods ([Voxblox](https://arxiv.org/abs/1611.03631), [FIESTA](https://arxiv.org/abs/1903.02144), [EDT](https://arxiv.org/abs/2105.04419)) on this task. A comparison of these methods' workflow are shown below.
 
 ![Pipeline](./docs/assets/comparison.png)
 
-Voxfield can be seamlessly integrated into those projects that originally use Voxblox as their volumetric mapping backbone (Cblox, Voxgraph, Kimera, etc). To make Voxfield directly compatible to those projects, we keep the name of our package as voxblox. In addition, we provide an example on a multi-resolution panoptic mapping framework [**Panmap**](https://github.com/VIS4ROB-lab/voxfield-panmap) for high-fidelity large-scale semantic reconstruction. 
+Voxfield can be seamlessly integrated into those projects that originally use Voxblox as their volumetric mapping backbone (Cblox, Voxgraph, Kimera, etc). To make Voxfield directly compatible to those projects, we keep the name of our package as voxblox. In addition, we provide an example on a multi-resolution panoptic mapping framework [**Panmap**](https://github.com/VIS4ROB-lab/voxfield-panmap) for high-fidelity large-scale semantic reconstruction.
 
 
 ## Installation
@@ -47,8 +47,8 @@ For more details, please follow these [instructions](https://voxblox.readthedocs
 
 ## Instructions
 
-- To run the non-projective TSDF mapping and ESDF mapping of the proposed Voxfield, use the executables: ```np_tsdf_server``` and ```voxfield_server```. 
-- To run the original TSDF mapping and ESDF mapping of Voxblox, use the executables: ```tsdf_server``` and ```voxblox_server```. 
+- To run the non-projective TSDF mapping and ESDF mapping of the proposed Voxfield, use the executables: ```np_tsdf_server``` and ```voxfield_server```.
+- To run the original TSDF mapping and ESDF mapping of Voxblox, use the executables: ```tsdf_server``` and ```voxblox_server```.
 - To run the ESDF mapping of FIESTA, use the executables: ```fiesta_server```.
 - To run the ESDF mapping of EDT, use the executables: ```voxedt_server```.
 - List of the ros services can be found [here](https://voxblox.readthedocs.io/en/latest/pages/The-Voxblox-Node.html), which should be the same as Voxblox.
@@ -134,7 +134,7 @@ If you find this code useful for your work or use it in your project, please con
 
 ## Acknowledgments
 
-We thanks greatly for the authors of the following opensource projects: 
+We thanks greatly for the authors of the following opensource projects:
 
 - [Voxblox](https://github.com/ethz-asl/voxblox) (underlying data structure, mesh reconstruction, visualization, comparison baseline)
 - [FIESTA](https://github.com/HKUST-Aerial-Robotics/FIESTA) (comparison baseline)
