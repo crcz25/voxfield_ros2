@@ -31,6 +31,7 @@
 
 #include "voxblox_ros/mesh_vis.h"
 #include "voxblox_ros/ptcloud_vis.h"
+#include "voxblox_ros/ros_params.h"
 #include "voxblox_ros/transformer.h"
 
 namespace voxblox {
@@ -41,6 +42,10 @@ class NpTsdfServer {
  public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
+  // The ROS 1 compatibility shim
+  // currently spins the node with rclcpp::spin(), so this active path assumes
+  // SingleThreadedExecutor-equivalent mutually exclusive callback execution.
+
   NpTsdfServer(const ros::NodeHandle& nh, const ros::NodeHandle& nh_private);
   NpTsdfServer(
       const ros::NodeHandle& nh, const ros::NodeHandle& nh_private,
@@ -50,6 +55,13 @@ class NpTsdfServer {
   virtual ~NpTsdfServer();
 
   void getServerConfigFromRosParam(const ros::NodeHandle& nh_private);
+
+  struct ProjectionResult {
+    bool valid = false;
+    int u = 0;
+    int v = 0;
+    float depth = 0.0f;
+  };
 
   void insertPointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud);
 
@@ -154,8 +166,8 @@ class NpTsdfServer {
       cv::Mat& color_image,         // NOLINT
       float min_z,            // NOLINT
       float min_d) const;         // NOLINT
-  float projectPointToImageLiDAR(const Point& p_C, int* u, int* v) const;
-  bool projectPointToImageCamera(const Point& p_C, int* u, int* v) const;
+  ProjectionResult projectPointToImageLiDAR(const Point& p_C) const;
+  ProjectionResult projectPointToImageCamera(const Point& p_C) const;
   cv::Mat computeNormalImage(
       const cv::Mat& vertex_map, const cv::Mat& depth_image) const;
   // from range image to point cloud
@@ -177,6 +189,34 @@ class NpTsdfServer {
   bool getNextPointcloudFromQueue(
       std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
       sensor_msgs::msg::PointCloud2::SharedPtr* pointcloud_msg, Transformation* T_G_C);
+  void prunePointcloudQueue(
+      std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
+      const std::string& queue_name,
+      const builtin_interfaces::msg::Time& newest_stamp);
+
+  struct DecodedPointcloud {
+    Pointcloud points_C;
+    Colors colors;
+    Labels labels;
+  };
+
+  struct PreprocessedPointcloud {
+    Pointcloud points_C;
+    Pointcloud normals_C;
+    Colors colors;
+  };
+
+  DecodedPointcloud decodePointcloudMessage(
+      const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg) const;
+  PreprocessedPointcloud projectAndEstimateNormals(
+      const DecodedPointcloud& decoded) const;
+  Transformation refinePoseWithIcp(
+      const Transformation& T_G_C, const Pointcloud& points_C,
+      const builtin_interfaces::msg::Time& stamp);
+  void integratePreparedPointcloud(
+      const Transformation& T_G_C, const PreprocessedPointcloud& pointcloud,
+      bool is_freespace_pointcloud);
+  void finishPointcloudIntegration(const Transformation& T_G_C);
 
   virtual void logMemoryStatus(
       const std::string& context, size_t cloud_points = 0u,
@@ -187,6 +227,10 @@ class NpTsdfServer {
 
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
+  SensorConfig sensor_config_;
+  RuntimeRosConfig runtime_config_;
+  VisualizationConfig visualization_config_;
+  QueueConfig queue_config_;
 
   /// Data subscribers.
   ros::Subscriber pointcloud_sub_;

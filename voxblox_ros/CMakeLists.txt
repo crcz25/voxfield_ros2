@@ -47,6 +47,7 @@ else()
 endif()
 
 add_library(${PROJECT_NAME}
+  src/ros_params.cc
   src/transformer.cc
   src/np_tsdf_server.cc
   src/voxfield_server.cc

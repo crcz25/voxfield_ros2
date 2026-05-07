@@ -1,6 +1,9 @@
 #include "voxblox_ros/transformer.h"
 
+#include <algorithm>
 #include <vector>
+
+#include "voxblox_ros/ros_params.h"
 
 namespace voxblox {
 namespace {
@@ -51,6 +54,12 @@ Transformer::Transformer(
   // Transform settings.
   nh_private_.param(
       "use_tf_transforms", use_tf_transforms_, use_tf_transforms_);
+  QueueConfig queue_config;
+  queue_config.max_transform_queue_size = max_transform_queue_size_;
+  queue_config.max_transform_queue_age_sec = max_transform_queue_age_sec_;
+  queue_config = getQueueConfigFromRosParam(nh_private_, queue_config);
+  max_transform_queue_size_ = queue_config.max_transform_queue_size;
+  max_transform_queue_age_sec_ = queue_config.max_transform_queue_age_sec;
   // If we use topic transforms, we have 2 parts: a dynamic transform from a
   // topic and a static transform from parameters (calibration).
   // Dynamic transform should be T_G_D (where D is whatever sensor the
@@ -98,6 +107,37 @@ Transformer::Transformer(
 void Transformer::transformCallback(
     const geometry_msgs::msg::TransformStamped& transform_msg) {
   transform_queue_.push_back(transform_msg);
+  pruneTransformQueue(transform_msg.header.stamp);
+}
+
+void Transformer::pruneTransformQueue(const ros::Time& newest_stamp) {
+  const size_t max_queue_size = std::max<size_t>(1u, max_transform_queue_size_);
+  size_t dropped_by_count = 0u;
+  while (transform_queue_.size() > max_queue_size) {
+    transform_queue_.pop_front();
+    ++dropped_by_count;
+  }
+
+  size_t dropped_by_age = 0u;
+  if (max_transform_queue_age_sec_ > 0.0) {
+    while (!transform_queue_.empty() &&
+           (newest_stamp - transform_queue_.front().header.stamp).toSec() >
+               max_transform_queue_age_sec_) {
+      transform_queue_.pop_front();
+      ++dropped_by_age;
+    }
+  }
+
+  if (dropped_by_count > 0u || dropped_by_age > 0u) {
+    ROS_WARN_STREAM_THROTTLE(
+        10.0,
+        "Pruned transform queue: dropped_by_count="
+            << dropped_by_count << " dropped_by_age=" << dropped_by_age
+            << " queue_size=" << transform_queue_.size()
+            << " max_queue_size=" << max_queue_size
+            << " max_queue_age_sec=" << max_transform_queue_age_sec_
+            << " newest_stamp=" << newest_stamp);
+  }
 }
 
 Transformation Transformer::getStaticTransform() const {

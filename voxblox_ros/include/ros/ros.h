@@ -19,6 +19,7 @@
 
 namespace ros {
 
+// Temporary ROS 1 compatibility shim for the active ROS 2 port. Should migrate callers to native rclcpp and remove the shim rather than growing it further.
 inline rclcpp::Node::SharedPtr& globalNode() {
   static rclcpp::Node::SharedPtr node;
   return node;
@@ -392,6 +393,8 @@ inline void init(int& argc, char** argv, const std::string& node_name) {
 }
 
 inline void spin() {
+  // rclcpp::spin uses SingleThreadedExecutor semantics here. Active Voxfield
+  // servers rely on that while callbacks and timers mutate shared map state.
   rclcpp::spin(globalNode());
 }
 

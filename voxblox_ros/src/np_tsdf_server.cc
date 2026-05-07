@@ -1,5 +1,6 @@
 #include "voxblox_ros/np_tsdf_server.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -150,8 +151,8 @@ NpTsdfServer::NpTsdfServer(
   gsdf_slice_pub_ = nh_private_.advertise<pcl::PointCloud<pcl::PointXYZI> >(
       "gsdf_slice", 1, true);
 
-  nh_private_.param(
-      "pointcloud_queue_size", pointcloud_queue_size_, pointcloud_queue_size_);
+  // Map-mutating pointcloud callbacks assume SingleThreadedExecutor-style
+  // mutually exclusive execution; see the class-level Phase 2 note.
   pointcloud_sub_ = nh_.subscribe(
       "pointcloud", pointcloud_queue_size_, &NpTsdfServer::insertPointcloud,
       this);
@@ -166,7 +167,6 @@ NpTsdfServer::NpTsdfServer(
       "tsdf_map_in", 1, &NpTsdfServer::tsdfMapCallback, this);
   robot_model_pub_ =
       nh_private_.advertise<visualization_msgs::msg::Marker>("Robot_model", 100);
-  nh_private_.param("publish_tsdf_map", publish_tsdf_map_, publish_tsdf_map_);
 
   if (use_freespace_pointcloud_) {
     // points that are not inside an object, but may also not be on a surface.
@@ -179,10 +179,6 @@ NpTsdfServer::NpTsdfServer(
   if (enable_icp_) {
     icp_transform_pub_ = nh_private_.advertise<geometry_msgs::msg::TransformStamped>(
         "icp_transform", 1, true);
-    nh_private_.param(
-        "icp_corrected_frame", icp_corrected_frame_, icp_corrected_frame_);
-    nh_private_.param(
-        "pose_corrected_frame", pose_corrected_frame_, pose_corrected_frame_);
   }
 
   // Initialize TSDF Map and integrator.
@@ -230,6 +226,7 @@ NpTsdfServer::NpTsdfServer(
       update_mesh_every_n_sec);
 
   if (update_mesh_every_n_sec > 0.0) {
+    // Timer mutates mesh state shared with pointcloud callbacks.
     update_mesh_timer_ = nh_private_.createTimer(
         ros::Duration(update_mesh_every_n_sec), &NpTsdfServer::updateMeshEvent,
         this);
@@ -243,6 +240,7 @@ NpTsdfServer::NpTsdfServer(
       publish_map_every_n_sec);
 
   if (publish_map_every_n_sec > 0.0) {
+    // Timer reads map state shared with pointcloud callbacks.
     publish_map_timer_ = nh_private_.createTimer(
         ros::Duration(publish_map_every_n_sec), &NpTsdfServer::publishMapEvent,
         this);
@@ -255,35 +253,71 @@ NpTsdfServer::~NpTsdfServer() {
 
 void NpTsdfServer::getServerConfigFromRosParam(
     const ros::NodeHandle& nh_private) {
-  // Before subscribing, determine minimum time between messages.
-  // 0 by default.
-  double min_time_between_msgs_sec = 0.0;
-  nh_private.param(
-      "min_time_between_msgs_sec", min_time_between_msgs_sec,
-      min_time_between_msgs_sec);
-  min_time_between_msgs_.fromSec(min_time_between_msgs_sec);
+  sensor_config_.sensor_is_lidar = sensor_is_lidar_;
+  sensor_config_.width = width_;
+  sensor_config_.height = height_;
+  sensor_config_.fx = fx_;
+  sensor_config_.fy = fy_;
+  sensor_config_.vx = vx_;
+  sensor_config_.vy = vy_;
+  sensor_config_.fov_up = fov_up_;
+  sensor_config_.fov_down = fov_down_;
+  sensor_config_.max_range = max_range_;
+  sensor_config_.min_range = min_range_;
+  sensor_config_.smooth_thre_ratio = smooth_thre_ratio_;
+  sensor_config_.min_dist = min_dist_;
+  sensor_config_.min_z = min_z_;
 
-  nh_private.param(
-      "max_block_distance_from_body", max_block_distance_from_body_,
-      max_block_distance_from_body_);
-  nh_private.param("slice_level", slice_level_, slice_level_);
-  nh_private.param("world_frame", world_frame_, world_frame_);
-  nh_private.param("sensor_frame", sensor_frame_, sensor_frame_);
-  nh_private.param(
-      "publish_pointclouds_on_update", publish_pointclouds_on_update_,
-      publish_pointclouds_on_update_);
-  nh_private.param("publish_slices", publish_slices_, publish_slices_);
-  nh_private.param(
-      "publish_pointclouds", publish_pointclouds_, publish_pointclouds_);
-  nh_private.param(
-      "use_freespace_pointcloud", use_freespace_pointcloud_,
-      use_freespace_pointcloud_);
-  nh_private.param(
-      "pointcloud_queue_size", pointcloud_queue_size_, pointcloud_queue_size_);
-  nh_private.param("enable_icp", enable_icp_, enable_icp_);
-  nh_private.param(
-      "accumulate_icp_corrections", accumulate_icp_corrections_,
-      accumulate_icp_corrections_);
+  runtime_config_.world_frame = world_frame_;
+  runtime_config_.sensor_frame = sensor_frame_;
+  runtime_config_.icp_corrected_frame = icp_corrected_frame_;
+  runtime_config_.pose_corrected_frame = pose_corrected_frame_;
+  runtime_config_.use_freespace_pointcloud = use_freespace_pointcloud_;
+  runtime_config_.enable_icp = enable_icp_;
+  runtime_config_.accumulate_icp_corrections = accumulate_icp_corrections_;
+  runtime_config_.min_time_between_msgs_sec = min_time_between_msgs_.toSec();
+  runtime_config_.max_block_distance_from_body = max_block_distance_from_body_;
+
+  visualization_config_.publish_tsdf_pointcloud = publish_pointclouds_;
+  visualization_config_.publish_esdf_pointcloud = publish_pointclouds_;
+  visualization_config_.publish_pointclouds_on_update =
+      publish_pointclouds_on_update_;
+  visualization_config_.publish_slices = publish_slices_;
+  visualization_config_.publish_robot_model = publish_robot_model_;
+  visualization_config_.publish_tsdf_map = publish_tsdf_map_;
+  visualization_config_.robot_model_file = robot_model_file_;
+  visualization_config_.robot_model_scale = robot_model_scale_;
+  visualization_config_.slice_level = slice_level_;
+
+  queue_config_.pointcloud_queue_size = pointcloud_queue_size_;
+
+  sensor_config_ = getSensorConfigFromRosParam(nh_private, sensor_config_);
+  runtime_config_ = getRuntimeRosConfigFromRosParam(nh_private, runtime_config_);
+  visualization_config_ =
+      getVisualizationConfigFromRosParam(nh_private, visualization_config_);
+  queue_config_ = getQueueConfigFromRosParam(nh_private, queue_config_);
+
+  min_time_between_msgs_.fromSec(runtime_config_.min_time_between_msgs_sec);
+  max_block_distance_from_body_ = runtime_config_.max_block_distance_from_body;
+  world_frame_ = runtime_config_.world_frame;
+  sensor_frame_ = runtime_config_.sensor_frame;
+  use_freespace_pointcloud_ = runtime_config_.use_freespace_pointcloud;
+  enable_icp_ = runtime_config_.enable_icp;
+  accumulate_icp_corrections_ = runtime_config_.accumulate_icp_corrections;
+  icp_corrected_frame_ = runtime_config_.icp_corrected_frame;
+  pose_corrected_frame_ = runtime_config_.pose_corrected_frame;
+
+  slice_level_ = visualization_config_.slice_level;
+  publish_pointclouds_on_update_ =
+      visualization_config_.publish_pointclouds_on_update;
+  publish_slices_ = visualization_config_.publish_slices;
+  publish_pointclouds_ = visualization_config_.publish_tsdf_pointcloud;
+  publish_tsdf_map_ = visualization_config_.publish_tsdf_map;
+  publish_robot_model_ = visualization_config_.publish_robot_model;
+  robot_model_file_ = visualization_config_.robot_model_file;
+  robot_model_scale_ = visualization_config_.robot_model_scale;
+
+  pointcloud_queue_size_ = std::max(1, queue_config_.pointcloud_queue_size);
 
   // Logging
   nh_private.param("verbose", verbose_, verbose_);
@@ -293,35 +327,29 @@ void NpTsdfServer::getServerConfigFromRosParam(
       memory_log_interval_sec_);
 
   // Sensor specific
-  nh_private_.param("sensor_is_lidar", sensor_is_lidar_, sensor_is_lidar_);
-  nh_private_.param("width", width_, width_);
-  nh_private_.param("height", height_, height_);
-  nh_private_.param(
-      "smooth_thre_ratio", smooth_thre_ratio_, smooth_thre_ratio_);
-  nh_private_.param(
-      "min_z", min_z_, min_z_);
-  nh_private_.param(
-      "min_dist", min_dist_, min_dist_);
+  sensor_is_lidar_ = sensor_config_.sensor_is_lidar;
+  width_ = sensor_config_.width;
+  height_ = sensor_config_.height;
+  max_range_ = sensor_config_.max_range;
+  min_range_ = sensor_config_.min_range;
+  smooth_thre_ratio_ = sensor_config_.smooth_thre_ratio;
+  min_z_ = sensor_config_.min_z;
+  min_dist_ = sensor_config_.min_dist;
 
   if (sensor_is_lidar_) {
-    nh_private_.param("fov_up", fov_up_, fov_up_);
-    nh_private_.param("fov_down", fov_down_, fov_down_);
+    fov_up_ = sensor_config_.fov_up;
+    fov_down_ = sensor_config_.fov_down;
     float fov = std::abs(fov_down_) + std::abs(fov_up_);
     fov_down_rad_ = fov_down_ / 180.0f * M_PI;
     fov_rad_ = fov / 180.0f * M_PI;
   } else {
-    nh_private_.param("vx", vx_, vx_);
-    nh_private_.param("vy", vy_, vy_);
-    nh_private_.param("fx", fx_, fx_);
-    nh_private_.param("fy", fy_, fy_);
+    vx_ = sensor_config_.vx;
+    vy_ = sensor_config_.vy;
+    fx_ = sensor_config_.fx;
+    fy_ = sensor_config_.fy;
   }
 
   // Robot model related
-  nh_private_.param(
-      "publish_robot_model", publish_robot_model_, publish_robot_model_);
-  nh_private_.param("robot_model_file", robot_model_file_, robot_model_file_);
-  nh_private_.param(
-      "robot_model_scale", robot_model_scale_, robot_model_scale_);
   robot_model_resource_ = resolveRobotModelResource(robot_model_file_);
   if (publish_robot_model_ && robot_model_resource_.empty()) {
     ROS_WARN(
@@ -404,9 +432,22 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
     return;
   }
 
+  const DecodedPointcloud decoded = decodePointcloudMessage(pointcloud_msg);
+  const PreprocessedPointcloud preprocessed = projectAndEstimateNormals(decoded);
+  const Transformation T_G_C_refined =
+      refinePoseWithIcp(T_G_C, preprocessed.points_C, pointcloud_msg->header.stamp);
+  integratePreparedPointcloud(
+      T_G_C_refined, preprocessed, is_freespace_pointcloud);
+  finishPointcloudIntegration(T_G_C);
+  publishRobotMesh(T_G_C_refined);
+
+  // Callback for inheriting classes.
+  newPoseCallback(T_G_C);
+}
+
+NpTsdfServer::DecodedPointcloud NpTsdfServer::decodePointcloudMessage(
+    const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg) const {
   timing::Timer ptcloud_timer("preprocess/input");
-  // Convert the PCL pointcloud into our awesome format.
-  // Horrible hack fix to fix color parsing colors in PCL.
   bool color_pointcloud = false;
   bool has_intensity = false;
   bool has_label = false;
@@ -422,110 +463,118 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
     }
   }
 
-  Pointcloud points_C;
-  Pointcloud normals_C;
-  Colors colors;
-  Labels labels;
+  DecodedPointcloud decoded;
 
-  // Convert differently depending on RGB or I type.
   if (has_label) {
     pcl::PointCloud<pcl::PointXYZRGBL> pointcloud_pcl;
-    // pointcloud_pcl is modified below:
     pcl::fromROSMsg(*pointcloud_msg, pointcloud_pcl);
     convertPointcloud(
-        pointcloud_pcl, color_map_, &points_C, &colors, &labels, true);
+        pointcloud_pcl, color_map_, &decoded.points_C, &decoded.colors,
+        &decoded.labels, true);
   } else if (color_pointcloud) {
     pcl::PointCloud<pcl::PointXYZRGB> pointcloud_pcl;
-    // pointcloud_pcl is modified below:
     pcl::fromROSMsg(*pointcloud_msg, pointcloud_pcl);
-    convertPointcloud(pointcloud_pcl, color_map_, &points_C, &colors);
+    convertPointcloud(
+        pointcloud_pcl, color_map_, &decoded.points_C, &decoded.colors);
   } else if (has_intensity) {
     pcl::PointCloud<pcl::PointXYZI> pointcloud_pcl;
-    // pointcloud_pcl is modified below:
     pcl::fromROSMsg(*pointcloud_msg, pointcloud_pcl);
-    convertPointcloud(pointcloud_pcl, color_map_, &points_C, &colors);
+    convertPointcloud(
+        pointcloud_pcl, color_map_, &decoded.points_C, &decoded.colors);
   } else {
     pcl::PointCloud<pcl::PointXYZ> pointcloud_pcl;
-    // pointcloud_pcl is modified below:
     pcl::fromROSMsg(*pointcloud_msg, pointcloud_pcl);
-    convertPointcloud(pointcloud_pcl, color_map_, &points_C, &colors);
+    convertPointcloud(
+        pointcloud_pcl, color_map_, &decoded.points_C, &decoded.colors);
   }
   ptcloud_timer.Stop();
+  return decoded;
+}
 
-  // calculate point-wise normal
+NpTsdfServer::PreprocessedPointcloud NpTsdfServer::projectAndEstimateNormals(
+    const DecodedPointcloud& decoded) const {
   timing::Timer range_pre_timer("preprocess/normal_estimation");
-  // Preprocess the point cloud: convert to range images
   cv::Mat vertex_map = cv::Mat::zeros(height_, width_, CV_32FC3);
   cv::Mat depth_image(vertex_map.size(), CV_32FC1, -1.0);
   cv::Mat color_image = cv::Mat::zeros(vertex_map.size(), CV_8UC3);
   projectPointCloudToImage(
-      points_C, colors, vertex_map, depth_image, color_image, min_z_, min_dist_);
+      decoded.points_C, decoded.colors, vertex_map, depth_image, color_image,
+      min_z_, min_dist_);
   cv::Mat normal_image = computeNormalImage(vertex_map, depth_image);
-  // Back project to point cloud from range images
-  points_C = extractPointCloud(vertex_map, depth_image);
-  normals_C = extractNormals(normal_image, depth_image);
-  colors = extractColors(color_image, depth_image);
-  
+
+  PreprocessedPointcloud preprocessed;
+  preprocessed.points_C = extractPointCloud(vertex_map, depth_image);
+  preprocessed.normals_C = extractNormals(normal_image, depth_image);
+  preprocessed.colors = extractColors(color_image, depth_image);
   range_pre_timer.Stop();
+  return preprocessed;
+}
 
-  // ICP based pose refinement
+Transformation NpTsdfServer::refinePoseWithIcp(
+    const Transformation& T_G_C, const Pointcloud& points_C,
+    const builtin_interfaces::msg::Time& stamp) {
   Transformation T_G_C_refined = T_G_C;
-  if (enable_icp_) {
-    timing::Timer icp_timer("icp");
-    if (!accumulate_icp_corrections_) {
-      icp_corrected_transform_.setIdentity();
-    }
-    static Transformation T_offset;
-    const size_t num_icp_updates = icp_->runICP(
-        tsdf_map_->getTsdfLayer(), points_C, icp_corrected_transform_ * T_G_C,
-        &T_G_C_refined);
-    if (verbose_) {
-      ROS_INFO(
-          "ICP refinement performed %zu successful update steps",
-          num_icp_updates);
-    }
-    icp_corrected_transform_ = T_G_C_refined * T_G_C.inverse();
-
-    if (!icp_->refiningRollPitch()) {
-      // its already removed internally but small floating point errors can
-      // build up if accumulating transforms
-      Transformation::Vector6 T_vec = icp_corrected_transform_.log();
-      T_vec[3] = 0.0;
-      T_vec[4] = 0.0;
-      icp_corrected_transform_ = Transformation::exp(T_vec);
-    }
-
-    // Publish transforms as both TF and message.
-    tf::Transform icp_tf_msg, pose_tf_msg;
-    geometry_msgs::msg::TransformStamped transform_msg;
-
-    tf::transformKindrToTF(
-        icp_corrected_transform_.cast<double>(), &icp_tf_msg);
-    tf::transformKindrToTF(T_G_C.cast<double>(), &pose_tf_msg);
-    tf::transformKindrToMsg(
-        icp_corrected_transform_.cast<double>(), &transform_msg.transform);
-    tf_broadcaster_.sendTransform(tf::StampedTransform(
-        icp_tf_msg, pointcloud_msg->header.stamp, world_frame_,
-        icp_corrected_frame_));
-    tf_broadcaster_.sendTransform(tf::StampedTransform(
-        pose_tf_msg, pointcloud_msg->header.stamp, icp_corrected_frame_,
-        pose_corrected_frame_));
-
-    transform_msg.header.frame_id = world_frame_;
-    transform_msg.child_frame_id = icp_corrected_frame_;
-    icp_transform_pub_.publish(transform_msg);
-
-    icp_timer.Stop();
+  if (!enable_icp_) {
+    return T_G_C_refined;
   }
 
+  timing::Timer icp_timer("icp");
+  if (!accumulate_icp_corrections_) {
+    icp_corrected_transform_.setIdentity();
+  }
+  const size_t num_icp_updates = icp_->runICP(
+      tsdf_map_->getTsdfLayer(), points_C, icp_corrected_transform_ * T_G_C,
+      &T_G_C_refined);
   if (verbose_) {
-    ROS_INFO("Integrating a pointcloud with %lu points.", points_C.size());
+    ROS_INFO(
+        "ICP refinement performed %zu successful update steps",
+        num_icp_updates);
+  }
+  icp_corrected_transform_ = T_G_C_refined * T_G_C.inverse();
+
+  if (!icp_->refiningRollPitch()) {
+    // Roll/pitch are removed internally; this prevents small accumulated
+    // floating point errors when corrections are accumulated.
+    Transformation::Vector6 T_vec = icp_corrected_transform_.log();
+    T_vec[3] = 0.0;
+    T_vec[4] = 0.0;
+    icp_corrected_transform_ = Transformation::exp(T_vec);
+  }
+
+  tf::Transform icp_tf_msg, pose_tf_msg;
+  geometry_msgs::msg::TransformStamped transform_msg;
+
+  tf::transformKindrToTF(
+      icp_corrected_transform_.cast<double>(), &icp_tf_msg);
+  tf::transformKindrToTF(T_G_C.cast<double>(), &pose_tf_msg);
+  tf::transformKindrToMsg(
+      icp_corrected_transform_.cast<double>(), &transform_msg.transform);
+  tf_broadcaster_.sendTransform(tf::StampedTransform(
+      icp_tf_msg, stamp, world_frame_, icp_corrected_frame_));
+  tf_broadcaster_.sendTransform(tf::StampedTransform(
+      pose_tf_msg, stamp, icp_corrected_frame_, pose_corrected_frame_));
+
+  transform_msg.header.frame_id = world_frame_;
+  transform_msg.child_frame_id = icp_corrected_frame_;
+  icp_transform_pub_.publish(transform_msg);
+
+  icp_timer.Stop();
+  return T_G_C_refined;
+}
+
+void NpTsdfServer::integratePreparedPointcloud(
+    const Transformation& T_G_C, const PreprocessedPointcloud& pointcloud,
+    bool is_freespace_pointcloud) {
+  if (verbose_) {
+    ROS_INFO(
+        "Integrating a pointcloud with %lu points.",
+        pointcloud.points_C.size());
   }
 
   ros::WallTime start = ros::WallTime::now();
-  // non-projective TSDF integration
   integratePointcloud(
-      T_G_C_refined, points_C, normals_C, colors, is_freespace_pointcloud);
+      T_G_C, pointcloud.points_C, pointcloud.normals_C, pointcloud.colors,
+      is_freespace_pointcloud);
   ros::WallTime end = ros::WallTime::now();
   if (verbose_) {
     ROS_INFO(
@@ -533,25 +582,19 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
         (end - start).toSec(),
         tsdf_map_->getTsdfLayer().getNumberOfAllocatedBlocks());
   }
-  logMemoryStatus("pointcloud", points_C.size());
+  logMemoryStatus("pointcloud", pointcloud.points_C.size());
+}
 
-  // mesh reconstruction with the counter interval
+void NpTsdfServer::finishPointcloudIntegration(const Transformation& T_G_C) {
   if (update_mesh_every_n_ > 0 && frame_count_ != 0 &&
       frame_count_ % update_mesh_every_n_ == 0) {
     updateMesh();
   }
 
-  // timing::Timer block_remove_timer("remove_distant_blocks");
   tsdf_map_->getTsdfLayerPtr()->removeDistantBlocks(
       T_G_C.getPosition(), max_block_distance_from_body_);
   mesh_layer_->clearDistantMesh(
       T_G_C.getPosition(), max_block_distance_from_body_);
-  // block_remove_timer.Stop();
-
-  publishRobotMesh(T_G_C_refined);
-
-  // Callback for inheriting classes.
-  newPoseCallback(T_G_C);
 }
 
 void NpTsdfServer::publishRobotMesh(const Transformation& T_G_C) {
@@ -593,7 +636,7 @@ bool NpTsdfServer::getNextPointcloudFromQueue(
     std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
     sensor_msgs::msg::PointCloud2::SharedPtr* pointcloud_msg, Transformation* T_G_C) {
   const size_t max_queue_size =
-      std::max<size_t>(1u, static_cast<size_t>(pointcloud_queue_size_));
+      std::max<size_t>(1u, queue_config_.max_pointcloud_queue_size);
   if (queue->empty()) {
     return false;
   }
@@ -610,13 +653,52 @@ bool NpTsdfServer::getNextPointcloudFromQueue(
           60,
           "Input pointcloud queue getting too long! Dropping "
           "some pointclouds. Either unable to look up transform "
-          "timestamps or the processing is taking too long.");
+          "timestamps or the processing is taking too long. queue_size=%zu "
+          "max_queue_size=%zu stamp=%.6f",
+          queue->size(), max_queue_size,
+          ros::Time((*pointcloud_msg)->header.stamp).toSec());
       while (queue->size() >= max_queue_size) {
         queue->pop();
       }
     }
   }
   return false;
+}
+
+void NpTsdfServer::prunePointcloudQueue(
+    std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
+    const std::string& queue_name,
+    const builtin_interfaces::msg::Time& newest_stamp) {
+  CHECK_NOTNULL(queue);
+  const size_t max_queue_size =
+      std::max<size_t>(1u, queue_config_.max_pointcloud_queue_size);
+  size_t dropped_by_count = 0u;
+  while (queue->size() > max_queue_size) {
+    queue->pop();
+    ++dropped_by_count;
+  }
+
+  size_t dropped_by_age = 0u;
+  if (queue_config_.max_pointcloud_queue_age_sec > 0.0) {
+    const ros::Time newest_time(newest_stamp);
+    while (!queue->empty() &&
+           (newest_time - queue->front()->header.stamp).toSec() >
+               queue_config_.max_pointcloud_queue_age_sec) {
+      queue->pop();
+      ++dropped_by_age;
+    }
+  }
+
+  if (dropped_by_count > 0u || dropped_by_age > 0u) {
+    ROS_WARN_THROTTLE(
+        10.0,
+        "Pruned %s pointcloud queue: dropped_by_count=%zu dropped_by_age=%zu "
+        "queue_size=%zu max_queue_size=%zu max_queue_age_sec=%.3f "
+        "newest_stamp=%.6f",
+        queue_name.c_str(), dropped_by_count, dropped_by_age, queue->size(),
+        max_queue_size, queue_config_.max_pointcloud_queue_age_sec,
+        ros::Time(newest_stamp).toSec());
+  }
 }
 
 void NpTsdfServer::insertPointcloud(
@@ -630,6 +712,8 @@ void NpTsdfServer::insertPointcloud(
     last_msg_time_ptcloud_ = pointcloud_msg_in->header.stamp;
     // So we have to process the queue anyway... Push this back.
     pointcloud_queue_.push(pointcloud_msg_in);
+    prunePointcloudQueue(
+        &pointcloud_queue_, "input", pointcloud_msg_in->header.stamp);
   }
 
   Transformation T_G_C;
@@ -673,6 +757,9 @@ void NpTsdfServer::insertFreespacePointcloud(
     last_msg_time_freespace_ptcloud_ = pointcloud_msg_in->header.stamp;
     // So we have to process the queue anyway... Push this back.
     freespace_pointcloud_queue_.push(pointcloud_msg_in);
+    prunePointcloudQueue(
+        &freespace_pointcloud_queue_, "freespace",
+        pointcloud_msg_in->header.stamp);
   }
 
   Transformation T_G_C;
@@ -1031,24 +1118,23 @@ bool NpTsdfServer::projectPointCloudToImage(
     float min_d) const {
   // TODO(py): consider to calculate in parallel to speed up
   for (size_t i = 0; i < points_C.size(); i++) {
-    int u, v;
-    float depth;
-    if (sensor_is_lidar_)
-      depth = projectPointToImageLiDAR(points_C[i], &u, &v);
-    else
-      depth = projectPointToImageCamera(points_C[i], &u, &v);
-    if (depth > min_d && points_C[i].z() > min_z) {
-      float old_depth = depth_image.at<float>(v, u);
+    const ProjectionResult projection =
+        sensor_is_lidar_ ? projectPointToImageLiDAR(points_C[i])
+                         : projectPointToImageCamera(points_C[i]);
+    if (projection.valid && projection.depth > min_d &&
+        points_C[i].z() > min_z) {
+      float old_depth = depth_image.at<float>(projection.v, projection.u);
       // save only nearest point for each pixel
-      if (old_depth <= 0.0 || old_depth > depth) {
+      if (old_depth <= 0.0 || old_depth > projection.depth) {
         for (int k = 0; k <= 2; k++) {
-          vertex_map.at<cv::Vec3f>(v, u)[k] = points_C[i](k);
+          vertex_map.at<cv::Vec3f>(projection.v, projection.u)[k] =
+              points_C[i](k);
         }
-        depth_image.at<float>(v, u) = depth;
+        depth_image.at<float>(projection.v, projection.u) = projection.depth;
         // BGR default order
-        color_image.at<cv::Vec3b>(v, u)[0] = colors[i].b;
-        color_image.at<cv::Vec3b>(v, u)[1] = colors[i].g;
-        color_image.at<cv::Vec3b>(v, u)[2] = colors[i].r;
+        color_image.at<cv::Vec3b>(projection.v, projection.u)[0] = colors[i].b;
+        color_image.at<cv::Vec3b>(projection.v, projection.u)[1] = colors[i].g;
+        color_image.at<cv::Vec3b>(projection.v, projection.u)[2] = colors[i].r;
       }
     }
   }
@@ -1056,14 +1142,15 @@ bool NpTsdfServer::projectPointCloudToImage(
 }
 
 // point should be in the LiDAR's coordinate system
-float NpTsdfServer::projectPointToImageLiDAR(
-    const Point& p_C, int* u, int* v) const {
+NpTsdfServer::ProjectionResult NpTsdfServer::projectPointToImageLiDAR(
+    const Point& p_C) const {
+  ProjectionResult result;
   // All values are ceiled and floored to guarantee that the resulting points
   // will be valid for any integer conversion.
   float depth =
       std::sqrt(p_C.x() * p_C.x() + p_C.y() * p_C.y() + p_C.z() * p_C.z());
   if (depth <= 0.0f) {
-    return -1.0f;
+    return result;
   }
   float yaw = std::atan2(p_C.y(), p_C.x());
   float pitch = std::asin(p_C.z() / depth);
@@ -1074,35 +1161,36 @@ float NpTsdfServer::projectPointToImageLiDAR(
   proj_x *= width_;
   proj_y *= height_;
   // round for integer index
-  CHECK_NOTNULL(u);
-  *u = std::round(proj_x);
-  if (*u == width_)
-    *u = 0;
+  result.u = std::round(proj_x);
+  if (result.u == width_)
+    result.u = 0;
 
-  CHECK_NOTNULL(v);
-  *v = std::round(proj_y);
+  result.v = std::round(proj_y);
   if (std::ceil(proj_y) > height_ - 1 || std::floor(proj_y) < 0) {
-    return (-1.0);
+    return result;
   }
-  return depth;
+  result.depth = depth;
+  result.valid = true;
+  return result;
 }
 
-bool NpTsdfServer::projectPointToImageCamera(
-    const Point& p_C, int* u, int* v) const {
+NpTsdfServer::ProjectionResult NpTsdfServer::projectPointToImageCamera(
+    const Point& p_C) const {
+  ProjectionResult result;
   if (p_C.z() <= 0.0f) {
-    return false;
+    return result;
   }
-  CHECK_NOTNULL(u);
-  *u = std::round(p_C.x() * fx_ / p_C.z() + vx_);
-  if (*u >= width_ || *u < 0) {
-    return false;
+  result.u = std::round(p_C.x() * fx_ / p_C.z() + vx_);
+  if (result.u >= width_ || result.u < 0) {
+    return result;
   }
-  CHECK_NOTNULL(v);
-  *v = std::round(p_C.y() * fy_ / p_C.z() + vy_);
-  if (*v >= height_ || *v < 0) {
-    return false;
+  result.v = std::round(p_C.y() * fy_ / p_C.z() + vy_);
+  if (result.v >= height_ || result.v < 0) {
+    return result;
   }
-  return true;
+  result.depth = p_C.z();
+  result.valid = true;
+  return result;
 }
 
 cv::Mat NpTsdfServer::computeNormalImage(

@@ -1,6 +1,7 @@
 #ifndef VOXBLOX_ROS_TRANSFORMER_H_
 #define VOXBLOX_ROS_TRANSFORMER_H_
 
+#include <cstddef>
 #include <string>
 
 #include <geometry_msgs/TransformStamped.h>
@@ -37,6 +38,7 @@ class Transformer {
 
   bool lookupTransformQueue(
       const ros::Time& timestamp, Transformation* transform);
+  void pruneTransformQueue(const ros::Time& newest_stamp);
 
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
@@ -83,6 +85,8 @@ class Transformer {
 
   // l Transform queue, used only when use_tf_transforms is false.
   AlignedDeque<geometry_msgs::msg::TransformStamped> transform_queue_;
+  size_t max_transform_queue_size_ = 200u;
+  double max_transform_queue_age_sec_ = 5.0;
 };
 
 }  // namespace voxblox

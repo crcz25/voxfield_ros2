@@ -43,6 +43,10 @@
 
 namespace voxblox {
 
+// Mesh visualization is still header-heavy because it combines small inline
+// color helpers with templated mesh-layer traversal.
+// Can split non-template helpers once the active ROS path is native rclcpp.
+
 enum ColorMode {
   kColor = 0,
   kHeight,

@@ -16,9 +16,11 @@
 #include "voxblox_ros/conversions.h"
 
 /**
- * This file contains a set of functions to visualize layers as pointclouds
- * (or marker arrays) based on a passed-in function. It also offers some
- * specializations of functions as samples.
+ * This file contains template helpers to visualize layers as pointclouds
+ * (or marker arrays) based on a passed-in function. These definitions remain
+ * in the header because callers instantiate them for several voxel
+ * types. Moving the non-template wrappers can be revisited with the broader
+ * visualization cleanup.
  */
 
 namespace voxblox {

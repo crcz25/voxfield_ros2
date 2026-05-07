@@ -77,17 +77,17 @@ void VoxfieldServer::setupRos() {
   esdf_map_sub_ = nh_private_.subscribe(
       "esdf_map_in", 1, &VoxfieldServer::esdfMapCallback, this);
 
+  publish_esdf_map_ = visualization_config_.publish_esdf_map;
+  publish_traversable_ = visualization_config_.publish_traversable;
+
   // Whether to clear each new pose as it comes in, and then set a sphere
   // around it to occupied.
   nh_private_.param(
       "clear_sphere_for_planning", clear_sphere_for_planning_,
       clear_sphere_for_planning_);
-  nh_private_.param("publish_esdf_map", publish_esdf_map_, publish_esdf_map_);
 
   // Special output for traversable voxels. Publishes all voxels with distance
   // at least traversibility radius.
-  nh_private_.param(
-      "publish_traversable", publish_traversable_, publish_traversable_);
   nh_private_.param(
       "traversability_radius", traversability_radius_, traversability_radius_);
   double update_esdf_every_n_sec = 1.0f;
@@ -100,6 +100,8 @@ void VoxfieldServer::setupRos() {
       "save_esdf_map", &VoxfieldServer::saveEsdfMapCallback, this);
 
   if (update_esdf_every_n_sec > 0.0) {
+    // ESDF timer mutates map state shared with pointcloud callbacks; the
+    // active path assumes SingleThreadedExecutor-equivalent execution.
     update_esdf_timer_ = nh_private_.createTimer(
         ros::Duration(update_esdf_every_n_sec),
         &VoxfieldServer::updateEsdfEvent, this);
