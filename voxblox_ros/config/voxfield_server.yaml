@@ -17,6 +17,10 @@ voxfield:
     verbose: true
     timing: false
 
+    # Periodic process/layer memory diagnostic interval in seconds. Set < 0 to
+    # disable.
+    memory_log_interval_sec: 5.0
+
     # -------------------------------------------------------
     # Input topics / message handling
     # -------------------------------------------------------
@@ -25,9 +29,9 @@ voxfield:
     # Drops messages that arrive faster than this rate. 0 = accept all.
     min_time_between_msgs_sec: 0.0
 
-    # ROS subscriber queue depth for the pointcloud topic. Increase if your
-    # sensor publishes bursts faster than integration can keep up.
-    pointcloud_queue_size: 50
+    # ROS subscriber queue depth for the pointcloud topic. Keep this small for
+    # high-rate depth clouds so stale 300k-point messages cannot accumulate.
+    pointcloud_queue_size: 5
 
     # Subscribe to a second freespace_pointcloud topic in addition to the main
     # pointcloud. Freespace points only update TSDF to negative (free) values
@@ -58,7 +62,7 @@ voxfield:
 
     # Side length of each TSDF voxel in metres. Smaller = higher resolution,
     # more memory. Directly determines truncation_distance when negative.
-    tsdf_voxel_size: 0.20
+    tsdf_voxel_size: 0.1
 
     # Number of voxels along each side of a block. Must be a power of 2.
     # Affects memory allocation granularity; 16 is a good default.
@@ -276,11 +280,17 @@ voxfield:
     # accuracy near surfaces but adds CPU cost.
     finer_esdf_on: false
 
-    # Local range boundary offsets (voxel indices). 10000 = effectively unbounded.
-    # Reduce to restrict ESDF updates to a smaller region around the robot.
-    local_range_offset_x: 10000
-    local_range_offset_y: 10000
-    local_range_offset_z: 10000
+    # Local range boundary offsets (voxel indices). The ROS 1 reference uses
+    # small bounded windows (20/20/10 for RGB-D, 20/20/5 for lidar). Very large
+    # values allocate every ESDF block in the expanded box and can exhaust RAM.
+    local_range_offset_x: 20
+    local_range_offset_y: 20
+    local_range_offset_z: 10
+
+    # Hard guard on ESDF blocks allocated by one local update window. This
+    # prevents accidental unbounded local_range_offset values from consuming all
+    # process memory.
+    max_esdf_blocks_per_update: 100000
 
     # -------------------------------------------------------
     # Mesh generation
@@ -389,9 +399,10 @@ voxfield:
     # Publish a 3D mesh marker showing the robot at its current pose.
     publish_robot_model: false
 
-    # Absolute path to a mesh file (e.g. .dae or .stl) for the robot model.
-    # Only used when publish_robot_model is true. Empty = no model.
-    robot_model_file: ""
+    # Mesh resource URI or absolute path for the robot model. Only used when
+    # publish_robot_model is true. Empty or invalid paths are skipped with a
+    # warning instead of publishing an invalid file:// marker.
+    robot_model_file: "package://voxblox_ros/cfg/model/camera.dae"
 
     # Uniform scale applied to the robot model mesh.
     robot_model_scale: 1.0

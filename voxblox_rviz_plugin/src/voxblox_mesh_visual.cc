@@ -152,7 +152,9 @@ void VoxbloxMeshVisual::setMessage(
     if (alpha < std::numeric_limits<uint8_t>::max()) {
       material_name = "VoxbloxMaterialTransparent";
     }
-    ogre_object->begin(material_name, Ogre::RenderOperation::OT_TRIANGLE_LIST);
+    ogre_object->begin(
+        material_name, Ogre::RenderOperation::OT_TRIANGLE_LIST,
+        "VoxbloxMaterials");
 
     for (size_t i = 0; i < connected_mesh.vertices.size(); ++i) {
       // note calling position changes what vertex the color and normal calls

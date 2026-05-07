@@ -1,10 +1,11 @@
 #ifndef VOXBLOX_ROS_COMPAT_ROS_H_
 #define VOXBLOX_ROS_COMPAT_ROS_H_
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
-#include <ostream>
 #include <memory>
+#include <ostream>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -305,7 +306,7 @@ class NodeHandle {
       void (ClassT::*callback)(const std::shared_ptr<MessageT>&),
       ClassT* object) const {
     return globalNode()->create_subscription<MessageT>(
-        resolveTopic(topic), rclcpp::QoS(rclcpp::KeepLast(queue_size)),
+        resolveTopic(topic), makeSubscriptionQos<MessageT>(queue_size),
         [object, callback](std::shared_ptr<MessageT> msg) {
           (object->*callback)(msg);
         });
@@ -316,7 +317,7 @@ class NodeHandle {
       const std::string& topic, size_t queue_size,
       void (ClassT::*callback)(const MessageT&), ClassT* object) const {
     return globalNode()->create_subscription<MessageT>(
-        resolveTopic(topic), rclcpp::QoS(rclcpp::KeepLast(queue_size)),
+        resolveTopic(topic), makeSubscriptionQos<MessageT>(queue_size),
         [object, callback](typename MessageT::SharedPtr msg) {
           (object->*callback)(*msg);
         });
@@ -357,6 +358,17 @@ class NodeHandle {
   }
 
   bool private_;
+
+  template <typename MessageT>
+  static rclcpp::QoS makeSubscriptionQos(size_t queue_size) {
+    const size_t depth = std::max<size_t>(1u, queue_size);
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(depth));
+    if constexpr (std::is_same_v<MessageT, sensor_msgs::msg::PointCloud2>) {
+      qos.best_effort();
+      qos.durability_volatile();
+    }
+    return qos;
+  }
 };
 
 inline void init(int& argc, char** argv, const std::string& node_name) {
@@ -385,6 +397,10 @@ inline void spin() {
 
 inline void spinOnce() {
   rclcpp::spin_some(globalNode());
+}
+
+inline bool ok() {
+  return rclcpp::ok();
 }
 
 inline void shutdown() {

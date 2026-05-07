@@ -21,8 +21,13 @@ EsdfVoxfieldIntegrator::EsdfVoxfieldIntegrator(
 
 // Main entrance
 void EsdfVoxfieldIntegrator::updateFromTsdfLayer(bool clear_updated_flag) {
+  if (shouldAbort()) {
+    return;
+  }
+
   BlockIndexList tsdf_blocks;
   tsdf_layer_->getAllUpdatedBlocks(Update::kEsdf, &tsdf_blocks);
+  last_tsdf_updated_block_count_ = tsdf_blocks.size();
 
   // LOG(INFO) << "count of the updated tsdf block: [" << tsdf_blocks.size()
   //           << "]";
@@ -45,6 +50,13 @@ void EsdfVoxfieldIntegrator::updateFromTsdfBlocks(
   CHECK_EQ(tsdf_layer_->voxels_per_side(), esdf_layer_->voxels_per_side());
   timing::Timer esdf_timer("update_esdf/voxfield");
 
+  insert_list_.clear();
+  delete_list_.clear();
+  update_queue_.clear();
+  last_insert_count_ = 0u;
+  last_delete_count_ = 0u;
+  last_local_range_block_count_ = 0u;
+
   // Go through all blocks in tsdf map (that are recently updated)
   // and copy their values for relevant voxels.
   timing::Timer allocate_timer("update_esdf/voxfield/allocate_vox");
@@ -52,6 +64,11 @@ void EsdfVoxfieldIntegrator::updateFromTsdfBlocks(
           << " updated blocks from the Tsdf.";
 
   for (const BlockIndex& block_index : tsdf_blocks) {
+    if (shouldAbort()) {
+      clear();
+      return;
+    }
+
     Block<TsdfVoxel>::Ptr tsdf_block =
         tsdf_layer_->getBlockPtrByIndex(block_index);
     if (!tsdf_block) {
@@ -130,15 +147,21 @@ void EsdfVoxfieldIntegrator::updateFromTsdfBlocks(
   }
 
   if (insert_list_.size() + delete_list_.size() > 0) {
+    last_insert_count_ = insert_list_.size();
+    last_delete_count_ = delete_list_.size();
     if (config_.verbose) {
       LOG(INFO) << "Insert [" << insert_list_.size() << "] and delete ["
                 << delete_list_.size() << "]";
     }
     getUpdateRange();
-    setLocalRange();
+    if (!setLocalRange()) {
+      clear();
+      return;
+    }
     allocate_timer.Stop();
 
     updateESDF();  // main func
+    update_queue_.clear();
   } else {
     return;
   }
@@ -169,7 +192,7 @@ void EsdfVoxfieldIntegrator::getUpdateRange() {
 }
 
 // Expand the updated range with a given margin and then allocate memory
-void EsdfVoxfieldIntegrator::setLocalRange() {
+bool EsdfVoxfieldIntegrator::setLocalRange() {
   // Keep updating
   range_min_ = update_range_min_ - config_.range_boundary_offset;
   range_max_ = update_range_max_ + config_.range_boundary_offset;
@@ -187,9 +210,45 @@ void EsdfVoxfieldIntegrator::setLocalRange() {
   // LOG(INFO) << "block_range_min: " << block_range_min;
   // LOG(INFO) << "block_range_max: " << block_range_max;
 
+  uint64_t block_count = 1u;
+  for (int i = 0; i <= 2; i++) {
+    const int64_t dim_count =
+        static_cast<int64_t>(block_range_max(i)) -
+        static_cast<int64_t>(block_range_min(i)) + 1;
+    if (dim_count <= 0) {
+      last_local_range_block_count_ = 0u;
+      return false;
+    }
+    if (block_count >
+        std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(dim_count)) {
+      block_count = std::numeric_limits<uint64_t>::max();
+      break;
+    }
+    block_count *= static_cast<uint64_t>(dim_count);
+  }
+
+  last_local_range_block_count_ =
+      block_count > std::numeric_limits<size_t>::max()
+          ? std::numeric_limits<size_t>::max()
+          : static_cast<size_t>(block_count);
+
+  if (config_.max_blocks_per_update > 0u &&
+      last_local_range_block_count_ > config_.max_blocks_per_update) {
+    LOG(ERROR) << "Refusing Voxfield ESDF local range allocation of "
+               << last_local_range_block_count_ << " blocks. "
+               << "Configured max_blocks_per_update is "
+               << config_.max_blocks_per_update
+               << ". Reduce local_range_offset_[xyz] or raise the cap "
+               << "only after confirming memory budget.";
+    return false;
+  }
+
   for (int x = block_range_min(0); x <= block_range_max(0); x++) {
     for (int y = block_range_min(1); y <= block_range_max(1); y++) {
       for (int z = block_range_min(2); z <= block_range_max(2); z++) {
+        if (shouldAbort()) {
+          return false;
+        }
         BlockIndex cur_block_idx = BlockIndex(x, y, z);
         // Allocate Esdf Block if it hasn't been allocated
         Block<EsdfVoxel>::Ptr esdf_block =
@@ -207,6 +266,7 @@ void EsdfVoxfieldIntegrator::setLocalRange() {
       }
     }
   }
+  return true;
 }
 
 // Set all the voxels in the range to be unfixed
@@ -290,6 +350,10 @@ void EsdfVoxfieldIntegrator::updateESDF() {
 
   // ESDF Updating Initialization
   while (!insert_list_.empty()) {
+    if (shouldAbort()) {
+      clear();
+      return;
+    }
     // these inserted list must all in the TSDF fixed band
     GlobalIndex cur_vox_idx = *insert_list_.begin();
     insert_list_.erase(insert_list_.begin());
@@ -310,6 +374,10 @@ void EsdfVoxfieldIntegrator::updateESDF() {
 
   // ESDF "increasing" update
   while (!delete_list_.empty()) {
+    if (shouldAbort()) {
+      clear();
+      return;
+    }
     // these are originally occupied but now not occupied any more
     GlobalIndex cur_vox_idx = *delete_list_.begin();
     delete_list_.erase(delete_list_.begin());
@@ -389,6 +457,10 @@ void EsdfVoxfieldIntegrator::updateESDF() {
   // ESDF "decreasing" updating (BFS based on priority queue)
   int updated_count = 0, patch_count = 0;
   while (!update_queue_.empty()) {
+    if (shouldAbort()) {
+      clear();
+      return;
+    }
     GlobalIndex cur_vox_idx = update_queue_.front();
     update_queue_.pop();
     EsdfVoxel* cur_vox = esdf_layer_->getVoxelPtrByGlobalIndex(cur_vox_idx);

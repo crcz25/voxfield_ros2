@@ -454,6 +454,14 @@ getEsdfVoxfieldIntegratorConfigFromRosParam(const ros::NodeHandle& nh_private) {
       "finer_esdf_on", esdf_integrator_config.finer_esdf_on,
       esdf_integrator_config.finer_esdf_on);
 
+  int max_blocks_per_update =
+      static_cast<int>(esdf_integrator_config.max_blocks_per_update);
+  nh_private.param(
+      "max_esdf_blocks_per_update", max_blocks_per_update,
+      max_blocks_per_update);
+  esdf_integrator_config.max_blocks_per_update =
+      max_blocks_per_update <= 0 ? 0u : static_cast<size_t>(max_blocks_per_update);
+
   esdf_integrator_config.range_boundary_offset(0) = range_boundary_offset_x;
   esdf_integrator_config.range_boundary_offset(1) = range_boundary_offset_y;
   esdf_integrator_config.range_boundary_offset(2) = range_boundary_offset_z;

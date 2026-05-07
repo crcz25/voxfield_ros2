@@ -1,10 +1,93 @@
 #include "voxblox_ros/np_tsdf_server.h"
 
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <cstring>
+
+#include <ament_index_cpp/get_package_share_directory.hpp>
+#include <ament_index_cpp/get_package_prefix.hpp>
 
 #include "voxblox_ros/conversions.h"
 #include "voxblox_ros/ros_params.h"
 
 namespace voxblox {
+namespace {
+
+bool startsWith(const std::string& value, const std::string& prefix) {
+  return value.rfind(prefix, 0) == 0;
+}
+
+bool packageResourceExists(const std::string& resource_uri) {
+  constexpr char kPackagePrefix[] = "package://";
+  const std::string package_path = resource_uri.substr(std::strlen(kPackagePrefix));
+  const size_t separator = package_path.find('/');
+  if (separator == std::string::npos || separator == 0 ||
+      separator + 1 >= package_path.size()) {
+    return false;
+  }
+
+  const std::string package_name = package_path.substr(0, separator);
+  const std::string relative_path = package_path.substr(separator + 1);
+  try {
+    const std::filesystem::path absolute_path =
+        std::filesystem::path(
+            ament_index_cpp::get_package_share_directory(package_name)) /
+        relative_path;
+    return std::filesystem::exists(absolute_path);
+  } catch (const ament_index_cpp::PackageNotFoundError&) {
+    return false;
+  }
+}
+
+std::string resolveRobotModelResource(const std::string& robot_model_file) {
+  if (robot_model_file.empty()) {
+    return "";
+  }
+
+  if (startsWith(robot_model_file, "package://")) {
+    if (packageResourceExists(robot_model_file)) {
+      return robot_model_file;
+    }
+    ROS_WARN(
+        "Robot model resource '%s' does not resolve to an installed file. "
+        "Robot_model marker will not be published.",
+        robot_model_file.c_str());
+    return "";
+  }
+
+  if (startsWith(robot_model_file, "file://")) {
+    const std::string absolute_path = robot_model_file.substr(7);
+    if (!absolute_path.empty() && std::filesystem::exists(absolute_path)) {
+      return robot_model_file;
+    }
+    ROS_WARN(
+        "Robot model file URI '%s' is empty or does not exist. "
+        "Robot_model marker will not be published.",
+        robot_model_file.c_str());
+    return "";
+  }
+
+  if (!robot_model_file.empty() && robot_model_file[0] == '/') {
+    if (std::filesystem::exists(robot_model_file)) {
+      return "file://" + robot_model_file;
+    }
+    ROS_WARN(
+        "Robot model file '%s' does not exist. Robot_model marker will not be "
+        "published.",
+        robot_model_file.c_str());
+    return "";
+  }
+
+  ROS_WARN(
+      "Robot model path '%s' is not a package:// URI, file:// URI, or absolute "
+      "path. Robot_model marker will not be published.",
+      robot_model_file.c_str());
+  return "";
+}
+
+}  // namespace
 
 NpTsdfServer::NpTsdfServer(
     const ros::NodeHandle& nh, const ros::NodeHandle& nh_private)
@@ -32,12 +115,14 @@ NpTsdfServer::NpTsdfServer(
       publish_slices_(false),
       publish_pointclouds_(false),
       publish_tsdf_map_(false),
+      publish_robot_model_(false),
       cache_mesh_(false),
       enable_icp_(false),
       accumulate_icp_corrections_(true),
       pointcloud_queue_size_(1),
       num_subscribers_tsdf_map_(0),
       transformer_(nh, nh_private) {
+  last_memory_log_time_ = std::chrono::steady_clock::now();
   getServerConfigFromRosParam(nh_private);
 
   // Advertise topics.
@@ -157,6 +242,10 @@ NpTsdfServer::NpTsdfServer(
   }
 }
 
+NpTsdfServer::~NpTsdfServer() {
+  shutdown();
+}
+
 void NpTsdfServer::getServerConfigFromRosParam(
     const ros::NodeHandle& nh_private) {
   // Before subscribing, determine minimum time between messages.
@@ -192,6 +281,9 @@ void NpTsdfServer::getServerConfigFromRosParam(
   // Logging
   nh_private.param("verbose", verbose_, verbose_);
   nh_private.param("timing", timing_, timing_);
+  nh_private.param(
+      "memory_log_interval_sec", memory_log_interval_sec_,
+      memory_log_interval_sec_);
 
   // Sensor specific
   nh_private_.param("sensor_is_lidar", sensor_is_lidar_, sensor_is_lidar_);
@@ -223,6 +315,12 @@ void NpTsdfServer::getServerConfigFromRosParam(
   nh_private_.param("robot_model_file", robot_model_file_, robot_model_file_);
   nh_private_.param(
       "robot_model_scale", robot_model_scale_, robot_model_scale_);
+  robot_model_resource_ = resolveRobotModelResource(robot_model_file_);
+  if (publish_robot_model_ && robot_model_resource_.empty()) {
+    ROS_WARN(
+        "publish_robot_model is true, but robot_model_file is empty or "
+        "invalid. Robot_model marker will not be published.");
+  }
 
   // Mesh settings.
   nh_private.param("mesh_filename", mesh_filename_, mesh_filename_);
@@ -258,6 +356,10 @@ void NpTsdfServer::getServerConfigFromRosParam(
 void NpTsdfServer::processPointCloudMessageAndInsert(
     const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg,
     const Transformation& T_G_C, const bool is_freespace_pointcloud) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
+
   timing::Timer ptcloud_timer("preprocess/input");
   // Convert the PCL pointcloud into our awesome format.
   // Horrible hack fix to fix color parsing colors in PCL.
@@ -389,6 +491,8 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
         (end - start).toSec(),
         tsdf_map_->getTsdfLayer().getNumberOfAllocatedBlocks());
   }
+  logMemoryStatus("pointcloud", points_C.size());
+
   // mesh reconstruction with the counter interval
   if (update_mesh_every_n_ > 0 && frame_count_ != 0 &&
       frame_count_ % update_mesh_every_n_ == 0) {
@@ -409,11 +513,15 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
 }
 
 void NpTsdfServer::publishRobotMesh(const Transformation& T_G_C) {
+  if (!publish_robot_model_ || robot_model_resource_.empty()) {
+    return;
+  }
+
   // publish the robot model with the pose
   visualization_msgs::msg::Marker robot_model;
   robot_model.header.frame_id = world_frame_;
   robot_model.header.stamp = ros::Time();
-  robot_model.mesh_resource = "file://" + robot_model_file_;
+  robot_model.mesh_resource = robot_model_resource_;
   robot_model.mesh_use_embedded_materials = true;
   robot_model.scale.x = robot_model.scale.y = robot_model.scale.z =
       robot_model_scale_;
@@ -471,6 +579,10 @@ bool NpTsdfServer::getNextPointcloudFromQueue(
 
 void NpTsdfServer::insertPointcloud(
     const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg_in) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
+
   if (pointcloud_msg_in->header.stamp - last_msg_time_ptcloud_ >
       min_time_between_msgs_) {
     last_msg_time_ptcloud_ = pointcloud_msg_in->header.stamp;
@@ -510,6 +622,10 @@ void NpTsdfServer::insertPointcloud(
 
 void NpTsdfServer::insertFreespacePointcloud(
     const sensor_msgs::msg::PointCloud2::SharedPtr& pointcloud_msg_in) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
+
   if (pointcloud_msg_in->header.stamp - last_msg_time_freespace_ptcloud_ >
       min_time_between_msgs_) {
     last_msg_time_freespace_ptcloud_ = pointcloud_msg_in->header.stamp;
@@ -752,11 +868,89 @@ bool NpTsdfServer::publishTsdfMapCallback(
 }
 
 void NpTsdfServer::updateMeshEvent(const ros::TimerEvent& /*event*/) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
   updateMesh();
 }
 
 void NpTsdfServer::publishMapEvent(const ros::TimerEvent& /*event*/) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
   publishMap();
+}
+
+void NpTsdfServer::shutdown() {
+  shutdown_requested_.store(true);
+  if (update_mesh_timer_) {
+    update_mesh_timer_->cancel();
+    update_mesh_timer_.reset();
+  }
+  if (publish_map_timer_) {
+    publish_map_timer_->cancel();
+    publish_map_timer_.reset();
+  }
+  pointcloud_sub_.reset();
+  freespace_pointcloud_sub_.reset();
+  tsdf_map_sub_.reset();
+  generate_mesh_srv_.reset();
+  clear_map_srv_.reset();
+  save_map_srv_.reset();
+  load_map_srv_.reset();
+  publish_pointclouds_srv_.reset();
+  publish_tsdf_map_srv_.reset();
+  std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>().swap(pointcloud_queue_);
+  std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>().swap(
+      freespace_pointcloud_queue_);
+}
+
+bool NpTsdfServer::shouldLogMemoryStatus() {
+  if (memory_log_interval_sec_ < 0.0) {
+    return false;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  const double elapsed =
+      std::chrono::duration<double>(now - last_memory_log_time_).count();
+  if (elapsed < memory_log_interval_sec_) {
+    return false;
+  }
+  last_memory_log_time_ = now;
+  return true;
+}
+
+double NpTsdfServer::getProcessRssMb() const {
+  std::ifstream status_file("/proc/self/status");
+  std::string line;
+  while (std::getline(status_file, line)) {
+    if (line.rfind("VmRSS:", 0) == 0) {
+      std::istringstream stream(line);
+      std::string label;
+      double rss_kb = 0.0;
+      std::string unit;
+      stream >> label >> rss_kb >> unit;
+      return rss_kb / 1024.0;
+    }
+  }
+  return -1.0;
+}
+
+void NpTsdfServer::logMemoryStatus(
+    const std::string& context, size_t cloud_points, size_t updated_blocks) {
+  if (!shouldLogMemoryStatus()) {
+    return;
+  }
+
+  const auto& tsdf_layer = tsdf_map_->getTsdfLayer();
+  ROS_INFO(
+      "[voxfield][mem] context=%s rss_mb=%.1f tsdf_blocks=%zu "
+      "tsdf_layer_mb=%.2f updated_blocks=%zu cloud_points=%zu "
+      "pointcloud_queue=%zu freespace_queue=%zu",
+      context.c_str(), getProcessRssMb(),
+      tsdf_layer.getNumberOfAllocatedBlocks(),
+      static_cast<double>(tsdf_layer.getMemorySize()) / (1024.0 * 1024.0),
+      updated_blocks, cloud_points, pointcloud_queue_.size(),
+      freespace_pointcloud_queue_.size());
 }
 
 void NpTsdfServer::clear() {

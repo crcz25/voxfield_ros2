@@ -65,7 +65,7 @@ void VoxedtServer::setupRos() {
   traversable_pub_ = nh_private_.advertise<pcl::PointCloud<pcl::PointXYZI> >(
       "traversable", 1, true);
   esdf_error_slice_pub_ =
-      nh_private_.advertise<pcl::PointCloud<pcl::PointXYZI> >(
+      nh_private_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >(
           "esdf_error_slice", 1, true);
 
   esdf_map_pub_ =

@@ -2,6 +2,8 @@
 #define VOXBLOX_INTEGRATOR_ESDF_VOXFIELD_INTEGRATOR_H_
 
 #include <algorithm>
+#include <functional>
+#include <limits>
 #include <queue>
 #include <utility>
 #include <vector>
@@ -95,6 +97,10 @@ class EsdfVoxfieldIntegrator {
 
     // Local map boundary size (unit: voxel)
     GlobalIndex range_boundary_offset = GlobalIndex(10, 10, 5);
+
+    // Fail-safe allocation cap for the local ESDF update window. A value of
+    // zero disables the cap, which is not recommended for online operation.
+    size_t max_blocks_per_update = 100000;
   };
 
   EsdfVoxfieldIntegrator(
@@ -113,7 +119,7 @@ class EsdfVoxfieldIntegrator {
   // Get the range of the updated tsdf grid (inserted or deleted)
   void getUpdateRange();
   // Expand the updated range with a given margin and then allocate memory
-  void setLocalRange();
+  bool setLocalRange();
   // Set all the voxels in the range to be unfixed
   void resetFixed();
   // Judge if a voxel is in the update range, if not, leave it still
@@ -121,6 +127,10 @@ class EsdfVoxfieldIntegrator {
 
   // main ESDF updating function
   void updateESDF();
+
+  void setShouldAbortCallback(std::function<bool()> should_abort_callback) {
+    should_abort_callback_ = std::move(should_abort_callback);
+  }
 
   // basic operations of a doubly linked list
   // delete operation
@@ -154,6 +164,19 @@ class EsdfVoxfieldIntegrator {
     }
   }
 
+  size_t getLastTsdfUpdatedBlockCount() const {
+    return last_tsdf_updated_block_count_;
+  }
+  size_t getLastInsertCount() const {
+    return last_insert_count_;
+  }
+  size_t getLastDeleteCount() const {
+    return last_delete_count_;
+  }
+  size_t getLastLocalRangeBlockCount() const {
+    return last_local_range_block_count_;
+  }
+
   // Convenience functions. Determine if the voxel is in the fixed band
   inline bool isFixed(FloatingPoint dist_m) const {
     return std::abs(dist_m) < config_.band_distance_m;
@@ -183,6 +206,10 @@ class EsdfVoxfieldIntegrator {
   }
 
  protected:
+  bool shouldAbort() const {
+    return should_abort_callback_ && should_abort_callback_();
+  }
+
   Config config_;
 
   size_t esdf_voxels_per_side_;
@@ -197,6 +224,7 @@ class EsdfVoxfieldIntegrator {
   GlobalIndexList delete_list_;
   BucketQueue<GlobalIndex> update_queue_;
   LongIndexSet updated_voxel_;
+  std::function<bool()> should_abort_callback_;
 
   // Update (inseted and deleted occupied voxels) range, unit: voxel
   GlobalIndex update_range_min_;
@@ -208,6 +236,10 @@ class EsdfVoxfieldIntegrator {
 
   // for recording and logging
   int total_updated_count_ = 0;
+  size_t last_tsdf_updated_block_count_ = 0u;
+  size_t last_insert_count_ = 0u;
+  size_t last_delete_count_ = 0u;
+  size_t last_local_range_block_count_ = 0u;
 };
 
 }  // namespace voxblox

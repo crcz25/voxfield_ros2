@@ -26,7 +26,7 @@ class VoxfieldServer : public NpTsdfServer {
       const TsdfMap::Config& tsdf_config,
       const NpTsdfIntegratorBase::Config& tsdf_integrator_config,
       const MeshIntegratorConfig& mesh_config);
-  virtual ~VoxfieldServer() {}
+  virtual ~VoxfieldServer();
 
   bool generateEsdfCallback(
       std_srvs::srv::Empty::Request& request,     // NOLINT
@@ -42,6 +42,7 @@ class VoxfieldServer : public NpTsdfServer {
   virtual void publishMap(bool reset_remote_map = false);
   virtual bool saveMap(const std::string& file_path);
   virtual bool loadMap(const std::string& file_path);
+  void shutdown() override;
 
   void updateEsdfEvent(const ros::TimerEvent& event);
 
@@ -100,6 +101,9 @@ class VoxfieldServer : public NpTsdfServer {
   /// Sets up publishing and subscribing. Should only be called from
   /// constructor.
   void setupRos();
+  void logMemoryStatus(
+      const std::string& context, size_t cloud_points = 0u,
+      size_t updated_blocks = 0u) override;
 
   /// Publish markers for visualization.
   ros::Publisher esdf_pointcloud_pub_;

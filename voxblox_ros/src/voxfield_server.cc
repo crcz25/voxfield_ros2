@@ -47,8 +47,15 @@ VoxfieldServer::VoxfieldServer(
   esdf_integrator_.reset(new EsdfVoxfieldIntegrator(
       esdf_integrator_config, tsdf_map_->getTsdfLayerPtr(),
       esdf_map_->getEsdfLayerPtr()));
+  esdf_integrator_->setShouldAbortCallback([this]() {
+    return shutdown_requested_.load() || !ros::ok();
+  });
 
   setupRos();
+}
+
+VoxfieldServer::~VoxfieldServer() {
+  shutdown();
 }
 
 void VoxfieldServer::setupRos() {
@@ -62,7 +69,7 @@ void VoxfieldServer::setupRos() {
       "traversable", 1, true);
   // py: added
   esdf_error_slice_pub_ =
-      nh_private_.advertise<pcl::PointCloud<pcl::PointXYZI> >(
+      nh_private_.advertise<pcl::PointCloud<pcl::PointXYZRGB> >(
           "esdf_error_slice", 1, true);
   esdf_map_pub_ =
       nh_private_.advertise<voxblox_msgs::msg::Layer>("esdf_map_out", 1, false);
@@ -156,6 +163,9 @@ void VoxfieldServer::publishSlices() {
 // }
 
 void VoxfieldServer::updateEsdfEvent(const ros::TimerEvent& /*event*/) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
   updateEsdf();
   if (publish_slices_)
     publishSlices();
@@ -237,11 +247,18 @@ bool VoxfieldServer::loadMap(const std::string& file_path) {
 }
 
 void VoxfieldServer::updateEsdf() {
-  if (tsdf_map_->getTsdfLayer().getNumberOfAllocatedBlocks() > 0) {
-    const bool clear_updated_flag_esdf = true;
-    esdf_integrator_->updateFromTsdfLayer(clear_updated_flag_esdf);
-    esdf_ready_ = true;  // py: added
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
   }
+  if (tsdf_map_->getTsdfLayer().getNumberOfAllocatedBlocks() == 0) {
+    return;
+  }
+
+  const bool clear_updated_flag_esdf = true;
+  esdf_integrator_->updateFromTsdfLayer(clear_updated_flag_esdf);
+  esdf_ready_ = true;  // py: added
+  logMemoryStatus(
+      "esdf_update", 0u, esdf_integrator_->getLastTsdfUpdatedBlockCount());
 }
 
 // void VoxfieldServer::updateEsdfBatch(bool full_euclidean) {
@@ -268,6 +285,10 @@ void VoxfieldServer::setTraversabilityRadius(float traversability_radius) {
 }
 
 void VoxfieldServer::newPoseCallback(const Transformation& T_G_C) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
+
   // if update_esdf_every_n_sec_ is negative
   // we regard it as the update interval
   if (update_esdf_every_n_ > 0 && frame_count_ != 0 &&
@@ -328,12 +349,57 @@ void VoxfieldServer::updateOccFromTsdf() {
 }
 
 void VoxfieldServer::evalEsdfEvent(const ros::TimerEvent& /*event*/) {
+  if (shutdown_requested_.load() || !ros::ok()) {
+    return;
+  }
   if (esdf_ready_) {
     updateOccFromTsdf();
     evalEsdfRefOcc();
     visualizeEsdfError();
     publishOccupancyOccupiedNodes();
   }
+}
+
+void VoxfieldServer::shutdown() {
+  if (shutdown_requested_.exchange(true)) {
+    return;
+  }
+  if (update_esdf_timer_) {
+    update_esdf_timer_->cancel();
+    update_esdf_timer_.reset();
+  }
+  if (eval_esdf_timer_) {
+    eval_esdf_timer_->cancel();
+    eval_esdf_timer_.reset();
+  }
+  esdf_map_sub_.reset();
+  save_esdf_map_srv_.reset();
+  NpTsdfServer::shutdown();
+}
+
+void VoxfieldServer::logMemoryStatus(
+    const std::string& context, size_t cloud_points, size_t updated_blocks) {
+  if (!shouldLogMemoryStatus()) {
+    return;
+  }
+
+  const auto& tsdf_layer = tsdf_map_->getTsdfLayer();
+  const auto& esdf_layer = esdf_map_->getEsdfLayer();
+  ROS_INFO(
+      "[voxfield][mem] context=%s rss_mb=%.1f tsdf_blocks=%zu "
+      "esdf_blocks=%zu tsdf_layer_mb=%.2f esdf_layer_mb=%.2f "
+      "updated_blocks=%zu cloud_points=%zu pointcloud_queue=%zu "
+      "freespace_queue=%zu esdf_inserts=%zu esdf_deletes=%zu "
+      "esdf_local_blocks=%zu",
+      context.c_str(), getProcessRssMb(),
+      tsdf_layer.getNumberOfAllocatedBlocks(),
+      esdf_layer.getNumberOfAllocatedBlocks(),
+      static_cast<double>(tsdf_layer.getMemorySize()) / (1024.0 * 1024.0),
+      static_cast<double>(esdf_layer.getMemorySize()) / (1024.0 * 1024.0),
+      updated_blocks, cloud_points, pointcloud_queue_.size(),
+      freespace_pointcloud_queue_.size(), esdf_integrator_->getLastInsertCount(),
+      esdf_integrator_->getLastDeleteCount(),
+      esdf_integrator_->getLastLocalRangeBlockCount());
 }
 
 void VoxfieldServer::publishOccupancyOccupiedNodes() {

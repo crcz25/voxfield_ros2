@@ -1,6 +1,8 @@
 #ifndef VOXBLOX_ROS_NP_TSDF_SERVER_H_
 #define VOXBLOX_ROS_NP_TSDF_SERVER_H_
 
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <queue>
 #include <string>
@@ -45,7 +47,7 @@ class NpTsdfServer {
       const TsdfMap::Config& config,
       const NpTsdfIntegratorBase::Config& integrator_config,
       const MeshIntegratorConfig& mesh_config);
-  virtual ~NpTsdfServer() {}
+  virtual ~NpTsdfServer();
 
   void getServerConfigFromRosParam(const ros::NodeHandle& nh_private);
 
@@ -81,6 +83,7 @@ class NpTsdfServer {
   virtual void publishMap(bool reset_remote_map = false);
   virtual bool saveMap(const std::string& file_path);
   virtual bool loadMap(const std::string& file_path);
+  virtual void shutdown();
 
   bool clearMapCallback(
       std_srvs::srv::Empty::Request& request,     // NOLINT
@@ -175,6 +178,12 @@ class NpTsdfServer {
       std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
       sensor_msgs::msg::PointCloud2::SharedPtr* pointcloud_msg, Transformation* T_G_C);
 
+  virtual void logMemoryStatus(
+      const std::string& context, size_t cloud_points = 0u,
+      size_t updated_blocks = 0u);
+  bool shouldLogMemoryStatus();
+  double getProcessRssMb() const;
+
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
 
@@ -218,6 +227,9 @@ class NpTsdfServer {
   bool verbose_;
   // output timing record or not
   bool timing_;
+  std::atomic_bool shutdown_requested_{false};
+  double memory_log_interval_sec_ = 5.0;
+  std::chrono::steady_clock::time_point last_memory_log_time_;
 
   /**
    * Global/map coordinate frame. Will always look up TF transforms to this
@@ -228,6 +240,7 @@ class NpTsdfServer {
 
   // Robot model related
   std::string robot_model_file_;
+  std::string robot_model_resource_;
   float robot_model_scale_ = 1.0;
 
   // Mesh reconstruction interval counter

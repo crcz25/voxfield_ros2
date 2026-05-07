@@ -194,6 +194,68 @@ source install/setup.bash
 ros2 launch voxblox_ros voxfield_server.launch.py
 ```
 
+## ROS 2 Jazzy Memory/Shutdown Fix
+
+Root cause found during the Jazzy port audit:
+
+- The ROS 1 Voxfield launch/config files use bounded ESDF local range offsets
+  such as `local_range_offset_x: 20`, `local_range_offset_y: 20`, and
+  `local_range_offset_z: 10` for RGB-D data.
+- The ROS 2 `voxblox_ros/config/voxfield_server.yaml` had been authored with
+  `local_range_offset_x/y/z: 10000`. These offsets are voxel indices, not
+  metres. `EsdfVoxfieldIntegrator::setLocalRange()` allocates every ESDF block
+  in the expanded update box, so the first ESDF update attempted an effectively
+  unbounded allocation while the TSDF `Layer memory` log stayed constant.
+- The ROS 2 point cloud compatibility subscriber also used generic reliable QoS
+  and the default YAML set `pointcloud_queue_size: 50`, which is inappropriate
+  for high-rate 300k-point sensor clouds.
+
+Fixes added:
+
+- `voxblox_ros/config/voxfield_server.yaml` now matches the bounded ROS 1 local
+  ESDF range defaults and uses `pointcloud_queue_size: 1`.
+- `voxblox_ros/include/ros/ros.h` maps `sensor_msgs/msg/PointCloud2`
+  subscriptions to bounded best-effort volatile QoS, while map/layer
+  subscriptions remain reliable.
+- `EsdfVoxfieldIntegrator` now has `max_esdf_blocks_per_update` and refuses a
+  pathological local range allocation before allocating blocks.
+- `voxfield_server` and `np_tsdf_server` cancel timers and drop local point cloud
+  queues during shutdown; the ESDF integrator checks an abort callback inside
+  long update loops so `Ctrl+C` can terminate cleanly.
+- Periodic memory diagnostics include process RSS, TSDF/ESDF block counts,
+  TSDF/ESDF layer memory, local queue sizes, and ESDF update-list sizes.
+
+Useful verification commands:
+
+```bash
+cd /mnt/DATA/repos/phd/voxfield_ros2
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths src/voxfield_ros2 --packages-select voxblox voxblox_ros \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+source install/setup.bash
+ros2 launch voxblox_ros voxfield_server.launch.py \
+  pointcloud_topic:=/intel_realsense_r200_depth/points \
+  world_frame:=odom \
+  sensor_frame:=realsense_depth_frame
+```
+
+AddressSanitizer/LeakSanitizer build:
+
+```bash
+colcon build --base-paths src/voxfield_ros2 --packages-select voxblox voxblox_ros \
+  --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_ASAN=ON
+```
+
+External RSS checks:
+
+```bash
+pid=$(pgrep -f 'voxfield_server')
+watch -n 1 "grep -E 'VmRSS|VmHWM' /proc/$pid/status"
+/usr/bin/time -v ros2 launch voxblox_ros voxfield_server.launch.py \
+  pointcloud_topic:=/intel_realsense_r200_depth/points \
+  world_frame:=odom sensor_frame:=realsense_depth_frame
+```
+
 Then open RViz2 from another sourced terminal, add the Voxblox mesh display, and
 select the server's mesh topic.
 
