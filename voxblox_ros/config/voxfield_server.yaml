@@ -31,7 +31,7 @@ voxfield:
 
     # ROS subscriber queue depth for the pointcloud topic. Keep this small for
     # high-rate depth clouds so stale 300k-point messages cannot accumulate.
-    pointcloud_queue_size: 5
+    pointcloud_queue_size: 10
 
     # Subscribe to a second freespace_pointcloud topic in addition to the main
     # pointcloud. Freespace points only update TSDF to negative (free) values

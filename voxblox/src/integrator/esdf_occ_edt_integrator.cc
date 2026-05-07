@@ -70,7 +70,7 @@ void EsdfOccEdtIntegrator::updateFromOccBlocks(
       if (occupancy_voxel.observed) {
         EsdfVoxel& esdf_voxel = esdf_block->getVoxelByLinearIndex(lin_index);
         esdf_voxel.behind = occupancy_voxel.behind;  // add signed
-        if (esdf_voxel.self_idx(0) == UNDEF) {
+        if (esdf_voxel.self_idx(0) == kUndefinedIndex) {
           esdf_voxel.observed = true;
           esdf_voxel.newly = true;
           VoxelIndex voxel_index =
@@ -102,8 +102,8 @@ void EsdfOccEdtIntegrator::updateFromOccBlocks(
 // Get the range of the changed occupancy grid (inserted or deleted)
 void EsdfOccEdtIntegrator::getUpdateRange() {
   // initialization
-  update_range_min_ << UNDEF, UNDEF, UNDEF;
-  update_range_max_ << -UNDEF, -UNDEF, -UNDEF;
+  update_range_min_ << kUndefinedIndex, kUndefinedIndex, kUndefinedIndex;
+  update_range_max_ << -kUndefinedIndex, -kUndefinedIndex, -kUndefinedIndex;
 
   for (auto it = insert_list_.begin(); it != insert_list_.end(); it++) {
     GlobalIndex cur_vox_idx = *it;
@@ -190,7 +190,7 @@ void EsdfOccEdtIntegrator::updateESDF() {
     delete_list_.erase(delete_list_.begin());
     EsdfVoxel* cur_vox = esdf_layer_->getVoxelPtrByGlobalIndex(cur_vox_idx);
     CHECK_NOTNULL(cur_vox);
-    cur_vox->coc_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
+    cur_vox->coc_idx = GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
     cur_vox->distance = config_.default_distance_m;
     // waiting for raise
     cur_vox->raise = 0.0f;
@@ -244,7 +244,7 @@ void EsdfOccEdtIntegrator::processRaise(EsdfVoxel* cur_vox) {
     EsdfVoxel* nbr_vox = esdf_layer_->getVoxelPtrByGlobalIndex(nbr_vox_idx);
     CHECK_NOTNULL(nbr_vox);
     GlobalIndex nbr_coc_vox_idx = nbr_vox->coc_idx;
-    if (!nbr_vox->observed || nbr_coc_vox_idx(0) == UNDEF)
+    if (!nbr_vox->observed || nbr_coc_vox_idx(0) == kUndefinedIndex)
       continue;
     OccupancyVoxel* nbr_coc_occ_vox =
         occ_layer_->getVoxelPtrByGlobalIndex(nbr_coc_vox_idx);
@@ -255,7 +255,7 @@ void EsdfOccEdtIntegrator::processRaise(EsdfVoxel* cur_vox) {
       update_queue_.push(nbr_vox_idx, std::abs(nbr_vox->distance));
       nbr_vox->raise = std::abs(nbr_vox->distance);
       nbr_vox->in_queue = true;
-      nbr_vox->coc_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
+      nbr_vox->coc_idx = GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
       nbr_vox->distance = config_.default_distance_m;
     } else if (!nbr_vox->in_queue) {
       nbr_vox->in_queue = true;

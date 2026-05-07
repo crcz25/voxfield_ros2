@@ -26,9 +26,9 @@ class Transformer {
 
   void transformCallback(const geometry_msgs::msg::TransformStamped& transform_msg);
 
-  Transformation getStaticTransform();
+  Transformation getStaticTransform() const;
 
-  Transformation getModelTransform();
+  Transformation getModelTransform() const;
 
  private:
   bool lookupTransformTf(

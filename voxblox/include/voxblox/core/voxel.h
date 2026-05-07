@@ -1,9 +1,8 @@
 #ifndef VOXBLOX_CORE_VOXEL_H_
 #define VOXBLOX_CORE_VOXEL_H_
 
-#include <climits>
 #include <cstdint>
-#include <float.h>
+#include <limits>
 #include <string>
 
 #include "voxblox/core/color.h"
@@ -11,8 +10,8 @@
 
 namespace voxblox {
 
-#define INF FLT_MAX
-#define UNDEF INT_MAX  // Undefined voxel index
+inline constexpr float kInfinity = std::numeric_limits<float>::max();
+inline constexpr int kUndefinedIndex = std::numeric_limits<int>::max();
 
 struct TsdfVoxel {
   // signed distance, +: in front, -: behind the surface
@@ -84,18 +83,23 @@ struct EsdfVoxel {
    * Index of this voxel's closest occupied voxel
    * Used by FIESTA and Voxfield
    */
-  GlobalIndex coc_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
+  GlobalIndex coc_idx =
+      GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
 
   /**
    * Simplified version of a doubly linked list (prev, next, head)
    * Used by FIESTA and Voxfield
    */
-  GlobalIndex prev_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
-  GlobalIndex next_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
-  GlobalIndex head_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
+  GlobalIndex prev_idx =
+      GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
+  GlobalIndex next_idx =
+      GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
+  GlobalIndex head_idx =
+      GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
 
   // Index of this voxel itself
-  GlobalIndex self_idx = GlobalIndex(UNDEF, UNDEF, UNDEF);
+  GlobalIndex self_idx =
+      GlobalIndex(kUndefinedIndex, kUndefinedIndex, kUndefinedIndex);
 
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };

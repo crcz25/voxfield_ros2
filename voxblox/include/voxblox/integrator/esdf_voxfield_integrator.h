@@ -123,7 +123,7 @@ class EsdfVoxfieldIntegrator {
   // Set all the voxels in the range to be unfixed
   void resetFixed();
   // Judge if a voxel is in the update range, if not, leave it still
-  inline bool voxInRange(GlobalIndex vox_idx);
+  inline bool voxInRange(GlobalIndex vox_idx) const;
 
   // main ESDF updating function
   void updateESDF();
@@ -139,8 +139,8 @@ class EsdfVoxfieldIntegrator {
   void insertIntoList(EsdfVoxel* occ_vox, EsdfVoxel* cur_vox);
 
   // calculate distance between two voxel centers
-  inline float dist(GlobalIndex vox_idx_a, GlobalIndex vox_idx_b);
-  inline int distSquare(GlobalIndex vox_idx_a, GlobalIndex vox_idx_b);
+  inline float dist(GlobalIndex vox_idx_a, GlobalIndex vox_idx_b) const;
+  inline int distSquare(GlobalIndex vox_idx_a, GlobalIndex vox_idx_b) const;
 
   // Assign the ESDF mapping error of the voxel (used for evaluation)
   void assignError(GlobalIndex vox_idx, float esdf_error);

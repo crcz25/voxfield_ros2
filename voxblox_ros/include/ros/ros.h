@@ -442,9 +442,21 @@ inline std::ostream& operator<<(
 
 #define ROS_INFO_ONCE(...) \
   do { static bool _ros_once = false; if (!_ros_once) { _ros_once = true; ROS_INFO(__VA_ARGS__); } } while (0)
-#define ROS_WARN_THROTTLE(period, ...) ROS_WARN(__VA_ARGS__)
-#define ROS_ERROR_THROTTLE(period, ...) ROS_ERROR(__VA_ARGS__)
-#define ROS_WARN_STREAM_THROTTLE(period, expr) ROS_WARN_STREAM(expr)
-#define ROS_ERROR_STREAM_THROTTLE(period, expr) ROS_ERROR_STREAM(expr)
+#define ROS_THROTTLE_MS(period) \
+  static_cast<int64_t>(static_cast<double>(period) * 1000.0)
+#define ROS_WARN_THROTTLE(period, ...) \
+  RCLCPP_WARN_THROTTLE( \
+      ::ros::get_logger(), *::ros::get_clock(), ROS_THROTTLE_MS(period), \
+      __VA_ARGS__)
+#define ROS_ERROR_THROTTLE(period, ...) \
+  RCLCPP_ERROR_THROTTLE( \
+      ::ros::get_logger(), *::ros::get_clock(), ROS_THROTTLE_MS(period), \
+      __VA_ARGS__)
+#define ROS_WARN_STREAM_THROTTLE(period, expr) \
+  RCLCPP_WARN_STREAM_THROTTLE( \
+      ::ros::get_logger(), *::ros::get_clock(), ROS_THROTTLE_MS(period), expr)
+#define ROS_ERROR_STREAM_THROTTLE(period, expr) \
+  RCLCPP_ERROR_STREAM_THROTTLE( \
+      ::ros::get_logger(), *::ros::get_clock(), ROS_THROTTLE_MS(period), expr)
 
 #endif  // VOXBLOX_ROS_COMPAT_ROS_H_

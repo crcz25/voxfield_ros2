@@ -1,10 +1,13 @@
 #include "voxblox_ros/np_tsdf_server.h"
 
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <string>
-#include <cstring>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <ament_index_cpp/get_package_prefix.hpp>
@@ -110,7 +113,7 @@ NpTsdfServer::NpTsdfServer(
       max_block_distance_from_body_(std::numeric_limits<FloatingPoint>::max()),
       slice_level_(0.5),
       use_freespace_pointcloud_(false),
-      color_map_(new RainbowColorMap()),
+      color_map_(std::make_shared<RainbowColorMap>()),
       publish_pointclouds_on_update_(false),
       publish_slices_(false),
       publish_pointclouds_(false),
@@ -124,6 +127,10 @@ NpTsdfServer::NpTsdfServer(
       transformer_(nh, nh_private) {
   last_memory_log_time_ = std::chrono::steady_clock::now();
   getServerConfigFromRosParam(nh_private);
+  if (!validateSensorConfig()) {
+    shutdown_requested_.store(true);
+    throw std::runtime_error("Invalid Voxfield sensor configuration");
+  }
 
   // Advertise topics.
   surface_pointcloud_pub_ =
@@ -179,28 +186,28 @@ NpTsdfServer::NpTsdfServer(
   }
 
   // Initialize TSDF Map and integrator.
-  tsdf_map_.reset(new TsdfMap(config));
+  tsdf_map_ = std::make_shared<TsdfMap>(config);
 
   std::string method("merged");
   nh_private_.param("method", method, method);
   if (method.compare("simple") == 0) {
-    tsdf_integrator_.reset(new SimpleNpTsdfIntegrator(
-        integrator_config, tsdf_map_->getTsdfLayerPtr()));
+    tsdf_integrator_ = std::make_unique<SimpleNpTsdfIntegrator>(
+        integrator_config, tsdf_map_->getTsdfLayerPtr());
   } else if (method.compare("merged") == 0) {
-    tsdf_integrator_.reset(new MergedNpTsdfIntegrator(
-        integrator_config, tsdf_map_->getTsdfLayerPtr()));
+    tsdf_integrator_ = std::make_unique<MergedNpTsdfIntegrator>(
+        integrator_config, tsdf_map_->getTsdfLayerPtr());
   } else if (method.compare("fast") == 0) {
-    tsdf_integrator_.reset(new FastNpTsdfIntegrator(
-        integrator_config, tsdf_map_->getTsdfLayerPtr()));
+    tsdf_integrator_ = std::make_unique<FastNpTsdfIntegrator>(
+        integrator_config, tsdf_map_->getTsdfLayerPtr());
   } else {
-    tsdf_integrator_.reset(new SimpleNpTsdfIntegrator(
-        integrator_config, tsdf_map_->getTsdfLayerPtr()));
+    tsdf_integrator_ = std::make_unique<SimpleNpTsdfIntegrator>(
+        integrator_config, tsdf_map_->getTsdfLayerPtr());
   }
 
-  mesh_layer_.reset(new MeshLayer(tsdf_map_->block_size()));
-  mesh_integrator_.reset(new MeshIntegrator<TsdfVoxel>(
-      mesh_config, tsdf_map_->getTsdfLayerPtr(), mesh_layer_.get()));
-  icp_.reset(new ICP(getICPConfigFromRosParam(nh_private)));
+  mesh_layer_ = std::make_shared<MeshLayer>(tsdf_map_->block_size());
+  mesh_integrator_ = std::make_unique<MeshIntegrator<TsdfVoxel>>(
+      mesh_config, tsdf_map_->getTsdfLayerPtr(), mesh_layer_.get());
+  icp_ = std::make_shared<ICP>(getICPConfigFromRosParam(nh_private));
 
   // Advertise services.
   generate_mesh_srv_ = nh_private_.advertiseService<std_srvs::srv::Empty>(
@@ -338,19 +345,56 @@ void NpTsdfServer::getServerConfigFromRosParam(
 
   // Default set in constructor.
   if (intensity_colormap == "rainbow") {
-    color_map_.reset(new RainbowColorMap());
+    color_map_ = std::make_shared<RainbowColorMap>();
   } else if (intensity_colormap == "inverse_rainbow") {
-    color_map_.reset(new InverseRainbowColorMap());
+    color_map_ = std::make_shared<InverseRainbowColorMap>();
   } else if (intensity_colormap == "grayscale") {
-    color_map_.reset(new GrayscaleColorMap());
+    color_map_ = std::make_shared<GrayscaleColorMap>();
   } else if (intensity_colormap == "inverse_grayscale") {
-    color_map_.reset(new InverseGrayscaleColorMap());
+    color_map_ = std::make_shared<InverseGrayscaleColorMap>();
   } else if (intensity_colormap == "ironbow") {
-    color_map_.reset(new IronbowColorMap());
+    color_map_ = std::make_shared<IronbowColorMap>();
   } else {
     ROS_ERROR_STREAM("Invalid color map: " << intensity_colormap);
   }
   color_map_->setMaxValue(intensity_max_value);
+}
+
+bool NpTsdfServer::validateSensorConfig() const {
+  if (width_ <= 0 || height_ <= 0) {
+    ROS_ERROR(
+        "Invalid sensor configuration: width and height must be positive "
+        "(width=%d, height=%d).",
+        width_, height_);
+    return false;
+  }
+
+  if (sensor_is_lidar_) {
+    if (fov_up_ <= fov_down_) {
+      ROS_ERROR(
+          "Invalid LiDAR sensor configuration: fov_up must be greater than "
+          "fov_down (fov_up=%.3f, fov_down=%.3f).",
+          fov_up_, fov_down_);
+      return false;
+    }
+    if (fov_rad_ <= 0.0f) {
+      ROS_ERROR(
+          "Invalid LiDAR sensor configuration: vertical FoV must be positive "
+          "(fov_rad=%.6f).",
+          fov_rad_);
+      return false;
+    }
+    return true;
+  }
+
+  if (fx_ <= 0 || fy_ <= 0) {
+    ROS_ERROR(
+        "Invalid camera sensor configuration: fx and fy must be positive "
+        "(fx=%d, fy=%d).",
+        fx_, fy_);
+    return false;
+  }
+  return true;
 }
 
 void NpTsdfServer::processPointCloudMessageAndInsert(
@@ -385,13 +429,11 @@ void NpTsdfServer::processPointCloudMessageAndInsert(
 
   // Convert differently depending on RGB or I type.
   if (has_label) {
-    pcl::PointCloud<pcl::PointXYZRGBL>::Ptr pointcloud_pcl(
-        new pcl::PointCloud<pcl::PointXYZRGBL>());
+    pcl::PointCloud<pcl::PointXYZRGBL> pointcloud_pcl;
     // pointcloud_pcl is modified below:
-    pcl::fromROSMsg(*pointcloud_msg, *pointcloud_pcl);
+    pcl::fromROSMsg(*pointcloud_msg, pointcloud_pcl);
     convertPointcloud(
-        *pointcloud_pcl, color_map_, &points_C, &colors, &labels, true);
-    pointcloud_pcl.reset(new pcl::PointCloud<pcl::PointXYZRGBL>());
+        pointcloud_pcl, color_map_, &points_C, &colors, &labels, true);
   } else if (color_pointcloud) {
     pcl::PointCloud<pcl::PointXYZRGB> pointcloud_pcl;
     // pointcloud_pcl is modified below:
@@ -1020,6 +1062,9 @@ float NpTsdfServer::projectPointToImageLiDAR(
   // will be valid for any integer conversion.
   float depth =
       std::sqrt(p_C.x() * p_C.x() + p_C.y() * p_C.y() + p_C.z() * p_C.z());
+  if (depth <= 0.0f) {
+    return -1.0f;
+  }
   float yaw = std::atan2(p_C.y(), p_C.x());
   float pitch = std::asin(p_C.z() / depth);
   // projections in image coordinates (percentage)
@@ -1044,6 +1089,9 @@ float NpTsdfServer::projectPointToImageLiDAR(
 
 bool NpTsdfServer::projectPointToImageCamera(
     const Point& p_C, int* u, int* v) const {
+  if (p_C.z() <= 0.0f) {
+    return false;
+  }
   CHECK_NOTNULL(u);
   *u = std::round(p_C.x() * fx_ / p_C.z() + vx_);
   if (*u >= width_ || *u < 0) {
@@ -1062,13 +1110,14 @@ cv::Mat NpTsdfServer::computeNormalImage(
   cv::Mat normal_image(depth_image.size(), CV_32FC3, 0.0);
   for (int u = 0; u < width_; u++) {
     for (int v = 0; v < height_; v++) {
+      if (v == 0 || v == height_ - 1) {
+        continue;
+      }
       Point p;
       p << vertex_map.at<cv::Vec3f>(v, u)[0], vertex_map.at<cv::Vec3f>(v, u)[1],
           vertex_map.at<cv::Vec3f>(v, u)[2];
 
       float d_p = depth_image.at<float>(v, u);
-      // sign of the normal vector
-      float sign = 1.0;
 
       if (d_p > 0) {
         // neighbor x (in ring)
@@ -1089,13 +1138,7 @@ cv::Mat NpTsdfServer::computeNormalImage(
           continue;
 
         // neighbor y
-        int n_y_v;
-        if (v == height_) {
-          n_y_v = v - 1;
-          sign *= -1.0;
-        } else {
-          n_y_v = v + 1;
-        }
+        const int n_y_v = v + 1;
         Point n_y;
         n_y << vertex_map.at<cv::Vec3f>(n_y_v, u)[0],
             vertex_map.at<cv::Vec3f>(n_y_v, u)[1],
@@ -1110,7 +1153,7 @@ cv::Mat NpTsdfServer::computeNormalImage(
         Point dx = n_x - p;
         Point dy = n_y - p;
 
-        Point normal = (dx.cross(dy)).normalized() * sign;
+        Point normal = (dx.cross(dy)).normalized();
         cv::Vec3f& normals = normal_image.at<cv::Vec3f>(v, u);
         for (int k = 0; k <= 2; k++)
           normals[k] = normal(k);

@@ -100,11 +100,11 @@ void Transformer::transformCallback(
   transform_queue_.push_back(transform_msg);
 }
 
-Transformation Transformer::getStaticTransform() {
+Transformation Transformer::getStaticTransform() const {
   return T_B_C_;
 }
 
-Transformation Transformer::getModelTransform() {
+Transformation Transformer::getModelTransform() const {
   return T_C_CH_;
 }
 

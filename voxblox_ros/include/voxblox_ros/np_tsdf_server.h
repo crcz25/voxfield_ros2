@@ -183,6 +183,7 @@ class NpTsdfServer {
       size_t updated_blocks = 0u);
   bool shouldLogMemoryStatus();
   double getProcessRssMb() const;
+  bool validateSensorConfig() const;
 
   ros::NodeHandle nh_;
   ros::NodeHandle nh_private_;
@@ -226,7 +227,7 @@ class NpTsdfServer {
   // output detailed log or not
   bool verbose_;
   // output timing record or not
-  bool timing_;
+  bool timing_ = false;
   std::atomic_bool shutdown_requested_{false};
   double memory_log_interval_sec_ = 5.0;
   std::chrono::steady_clock::time_point last_memory_log_time_;
@@ -337,24 +338,24 @@ class NpTsdfServer {
   Transformation icp_corrected_transform_;
 
   // Sensor specification
-  int width_;
-  int height_;
-  float max_range_;
-  float min_range_;
+  int width_ = 640;
+  int height_ = 480;
+  float max_range_ = 0.0f;
+  float min_range_ = 0.0f;
   float smooth_thre_ratio_ = 1.0f;
   bool sensor_is_lidar_ = false;
 
   // Camera
-  int vx_;
-  int vy_;
-  int fx_;
-  int fy_;
+  int vx_ = 320;
+  int vy_ = 240;
+  int fx_ = 566;
+  int fy_ = 566;
 
   // LiDAR
-  float fov_up_;
-  float fov_down_;
-  float fov_down_rad_;
-  float fov_rad_;
+  float fov_up_ = 3.0f;
+  float fov_down_ = -25.0f;
+  float fov_down_rad_ = 0.0f;
+  float fov_rad_ = 0.0f;
 
   // For preprocessing noise filter (mianly for KITTI)
   float min_dist_ = 0.1f; // 2.75 for KITTI
