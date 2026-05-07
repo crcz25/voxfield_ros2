@@ -1,101 +1,488 @@
 voxfield:
   ros__parameters:
-    world_frame: world
-    sensor_frame: sensor
+
+    # -------------------------------------------------------
+    # General / ROS integration
+    # -------------------------------------------------------
+
+    # Use simulation time from /clock. Set true when replaying rosbags.
+    use_sim_time: true
+
+    # Global map frame. All incoming pointclouds are transformed into this frame
+    # via TF. If the transform from sensor_frame to world_frame is unavailable,
+    # integration is silently skipped.
+    world_frame: odom
+
+    # Enable verbose integration and timing logging to console.
+    verbose: true
+    timing: false
+
+    # -------------------------------------------------------
+    # Input topics / message handling
+    # -------------------------------------------------------
+
+    # Minimum wall-clock time between processed pointcloud messages (seconds).
+    # Drops messages that arrive faster than this rate. 0 = accept all.
+    min_time_between_msgs_sec: 0.0
+
+    # ROS subscriber queue depth for the pointcloud topic. Increase if your
+    # sensor publishes bursts faster than integration can keep up.
+    pointcloud_queue_size: 50
+
+    # Subscribe to a second freespace_pointcloud topic in addition to the main
+    # pointcloud. Freespace points only update TSDF to negative (free) values
+    # beyond the truncation distance; they are not used for surface reconstruction.
+    # Enable and set freespace_pointcloud_topic in the launch file.
+    use_freespace_pointcloud: false
+
+    # -------------------------------------------------------
+    # TF / transform resolution
+    # -------------------------------------------------------
+
+    # Use TF to look up sensor->world transforms. Set false only when using the
+    # /transform topic + static calibration matrices (T_B_D, T_B_C) instead.
     use_tf_transforms: true
+
+    # Maximum time difference (seconds) tolerated when matching a pointcloud
+    # timestamp to a transform in the TF buffer or transform queue.
     timestamp_tolerance_sec: 0.001
 
-    method: merged
-    voxel_size: 0.20
-    voxels_per_side: 16
+    # Override the sensor frame used in TF lookups. Empty string = use the
+    # frame_id from the incoming pointcloud header. Setting this incorrectly
+    # will prevent TF lookups from succeeding and block integration.
+    # sensor_frame: ""
+
+    # -------------------------------------------------------
+    # TSDF map structure
+    # -------------------------------------------------------
+
+    # Side length of each TSDF voxel in metres. Smaller = higher resolution,
+    # more memory. Directly determines truncation_distance when negative.
     tsdf_voxel_size: 0.20
+
+    # Number of voxels along each side of a block. Must be a power of 2.
+    # Affects memory allocation granularity; 16 is a good default.
     tsdf_voxels_per_side: 16
+
+    # -------------------------------------------------------
+    # TSDF integration
+    # -------------------------------------------------------
+
+    # Integrator algorithm variant.
+    #   simple  - basic ray-casting, most accurate but slowest.
+    #   merged  - merges rays with the same destination voxel; good balance.
+    #   fast    - skips recently-updated voxels; fastest but less complete.
+    method: merged
+
+    # TSDF truncation distance in metres. Negative values are interpreted as a
+    # multiplier of tsdf_voxel_size (e.g. -2.0 → 2 × 0.20 = 0.40 m).
+    # Affects surface thickness and ESDF propagation accuracy.
     truncation_distance: -2.0
-    update_mesh_every_n_sec: 1.0
-    update_esdf_every_n_sec: 1.0
-    publish_map_every_n_sec: 1.0
 
-    publish_slices: true
-    publish_pointclouds: true
-    publish_pointclouds_on_update: false
-    publish_tsdf_map: true
-    publish_esdf_map: true
-    publish_traversable: false
-    use_freespace_pointcloud: false
-    pointcloud_queue_size: 10
-    max_block_distance_from_body: 1000000.0
+    # Carve free space along each ray beyond the surface. Disabling this will
+    # leave voxels in front of surfaces as unknown rather than free.
+    voxel_carving_enabled: true
 
-    color_mode: color
-    intensity_colormap: rainbow
-    intensity_max_value: 100.0
-    min_time_between_msgs_sec: 0.0
-    enable_icp: false
-    accumulate_icp_corrections: true
-
-    sensor_is_lidar: true
-    width: 1024
-    height: 64
-    fov_up: 3.0
-    fov_down: -25.0
-    smooth_thre_ratio: 0.05
-    min_z: -1000.0
-    min_dist: 0.1
-
+    # Rays longer than this distance (metres) are clipped. Tune for your sensor
+    # range; very long rays slow integration and may introduce noise.
     max_ray_length_m: 20.0
+
+    # Rays shorter than this distance (metres) are discarded. Set to a value
+    # that filters out points on the robot body or sensor casing.
     min_ray_length_m: 0.1
+
+    # Maximum TSDF weight a voxel can accumulate. Limits long-term drift
+    # correction ability; 10000 is rarely reached in practice.
     max_weight: 10000.0
+
+    # Use a constant weight of 1.0 for all rays instead of a distance-based
+    # weight. Useful for sensors with uniform noise models.
     use_const_weight: false
+
+    # Reduce weight for rays that end far from the sensor. Improves accuracy
+    # near surfaces but can cause instability if set too aggressively.
     use_weight_dropoff: true
+
+    # Exponent applied to the weight along the ray for NP-TSDF. 1.0 = linear.
+    weight_reduction_exp: 1.0
+
+    # Epsilon for weight-dropoff distance computation. Negative = use truncation
+    # distance as epsilon. Rarely needs manual tuning.
+    weight_dropoff_epsilon: -1.0
+
+    # Allow integration of points that push TSDF values negative (free space
+    # on the far side of surfaces). Disabling breaks freespace reasoning.
     allow_clear: true
+
+    # Subsampling factor for the merged integrator's start-voxel selection.
+    # Higher values skip more voxels; improves speed at cost of coverage.
     start_voxel_subsampling_factor: 2.0
+
+    # Maximum consecutive ray collisions in the merged integrator before a ray
+    # is considered as fully absorbed and integration of it stops.
     max_consecutive_ray_collisions: 2
+
+    # How often (in frames) the merged integrator checks for clear operations.
     clear_checks_every_n_frames: 1
+
+    # Hard time limit (seconds) per integration call. 0 = no limit.
+    # Useful for real-time systems with tight timing budgets.
     max_integration_time_s: 0.0
+
+    # Enable anti-grazing heuristic to suppress spurious voxel updates on
+    # surfaces seen at very shallow angles.
     anti_grazing: false
+
+    # Apply a sparsity compensation factor to account for uneven point
+    # distribution in sparse sensor data (e.g. spinning LiDAR).
     use_sparsity_compensation_factor: false
+
+    # Compensation factor value (only used when use_sparsity_compensation_factor
+    # is true). Scales the effective ray weight for sparse pointclouds.
     sparsity_compensation_factor: 1.0
+
+    # Order in which rays are processed.
+    #   mixed     - shuffle rays for better cache behaviour (recommended).
+    #   sorted    - sort by direction for deterministic output.
+    #   unsorted  - process in input order.
     integration_order_mode: mixed
+
+    # Number of parallel threads for integration. 0.0 = use all hardware
+    # threads. Reduce to limit CPU usage; must be ≥ 1.
     integrator_threads: 0.0
+
+    # Merge updated voxels with the existing clear state during integration.
+    # Disabling may cause inconsistencies between the TSDF and freespace map.
     merge_with_clear: true
+
+    # -------------------------------------------------------
+    # Normal-preserving (NP-TSDF) integration
+    # -------------------------------------------------------
+
+    # Expect per-point normals in the incoming pointcloud. When true the
+    # integrator uses surface normals to compute non-projective TSDF updates.
+    # If normals are absent in the cloud but this is true, results are undefined.
     normal_available: true
+
+    # Ratio of reliable band (in truncation distances) within which NP-TSDF
+    # updates are trusted. Voxels beyond this ratio use a fallback weight.
     reliable_band_ratio: 1.5
+
+    # Assume curved surfaces when estimating per-point normal quality. Improves
+    # behaviour on curved objects at the cost of slightly higher CPU usage.
     curve_assumption: true
+
+    # Minimum dot-product ratio between the ray direction and the surface normal
+    # for a normal to be considered reliable. Lower = more permissive.
     reliable_normal_ratio_thre: 0.5
 
+    # -------------------------------------------------------
+    # Sensor model (NP-TSDF normal estimation)
+    # -------------------------------------------------------
+
+    # True = LiDAR sensor; normal estimation uses spherical projection.
+    # False = depth camera; normal estimation uses pinhole projection.
+    sensor_is_lidar: false
+
+    # Image width (pixels) of the sensor's depth image used for normal
+    # estimation. Must match actual sensor resolution.
+    width: 640
+
+    # Image height (pixels) of the sensor's depth image used for normal
+    # estimation. Must match actual sensor resolution.
+    height: 480
+
+    # Smoothness threshold ratio for depth discontinuity detection during normal
+    # estimation. Smaller values are more aggressive at filtering edge normals.
+    smooth_thre_ratio: 0.05
+
+    # Minimum Z height (metres) for points fed into normal estimation. Points
+    # below this are discarded. Set to -1000.0 to keep all points.
+    min_z: -1000.0
+
+    # Minimum distance (metres) from the sensor origin for normal estimation.
+    # Points closer than this are discarded. Set ~2.75 for KITTI LiDAR.
+    min_dist: 0.1
+
+    # --- Camera intrinsics (used when sensor_is_lidar is false) ---
+
+    # Principal point X coordinate (pixels). Must match the sensor calibration.
+    vx: 320
+
+    # Principal point Y coordinate (pixels). Must match the sensor calibration.
+    vy: 240
+
+    # Focal length in X (pixels). Must match the sensor calibration.
+    fx: 566
+
+    # Focal length in Y (pixels). Must match the sensor calibration.
+    fy: 566
+
+    # --- LiDAR FoV (used when sensor_is_lidar is true; inactive otherwise) ---
+
+    # Upper field-of-view limit in degrees. Positive = above horizontal.
+    # fov_up: 3.0
+
+    # Lower field-of-view limit in degrees. Negative = below horizontal.
+    # fov_down: -25.0
+
+    # -------------------------------------------------------
+    # ESDF / Voxfield integrator
+    # -------------------------------------------------------
+
+    # Interval (seconds) between ESDF update calls.
+    # Positive = timer-driven. Negative integer = update every N frames.
+    # E.g. update_esdf_every_n_sec: -5 updates ESDF every 5 integrated frames.
+    update_esdf_every_n_sec: 1.0
+
+    # Maximum propagation distance for the ESDF (metres). Voxels further from
+    # the nearest surface receive this value. Increase for planning in large
+    # spaces; larger values increase computation time.
     esdf_max_distance_m: 10.0
+
+    # Default distance assigned to unobserved voxels. Should be ≥ esdf_max_distance_m.
+    # If smaller, it is automatically raised to esdf_max_distance_m at startup.
     esdf_default_distance_m: 10.0
+
+    # Width (metres) of the fixed-band region around surfaces within which the
+    # ESDF is updated every frame regardless of change. Must be > truncation_distance.
     fix_band_distance_m: 1.0
+
+    # Maximum distance (metres) behind a surface that is considered for ESDF
+    # updates. Should be at least sqrt(3) × truncation_distance to capture
+    # all diagonal neighbours.
     max_behind_surface_m: 1.0
+
+    # Minimum TSDF weight for a voxel to be treated as occupied by the ESDF
+    # integrator. Lower values use noisier surface estimates.
     occ_min_weight: 0.1
+
+    # Ratio of occupancy voxel size to TSDF voxel size. 1.0 = same resolution.
     occ_voxel_size_ratio: 1.0
+
+    # Number of distance buckets in the Voxfield priority queue. More buckets
+    # improve scheduling accuracy at the cost of memory; 20 is a good default.
     num_buckets: 20
+
+    # Enable the Voxfield patch update: propagates ESDF corrections only in the
+    # neighbourhood of changed TSDF voxels. Disabling forces full-map sweeps.
     patch_on: true
+
+    # Allow early termination of ESDF propagation when the wavefront distance
+    # exceeds esdf_max_distance_m. Disabling may improve accuracy in edge cases.
     early_break: true
+
+    # Enable sub-voxel ESDF refinement for finer distance estimates. Increases
+    # accuracy near surfaces but adds CPU cost.
     finer_esdf_on: false
+
+    # Local range boundary offsets (voxel indices). 10000 = effectively unbounded.
+    # Reduce to restrict ESDF updates to a smaller region around the robot.
     local_range_offset_x: 10000
     local_range_offset_y: 10000
     local_range_offset_z: 10000
 
-    clear_sphere_for_planning: false
+    # -------------------------------------------------------
+    # Mesh generation
+    # -------------------------------------------------------
+
+    # Interval (seconds) between mesh update calls. Positive = timer-driven.
+    # Negative integer = update every N integrated frames (e.g. -1 = every frame).
+    update_mesh_every_n_sec: 1.0
+
+    # Colorisation mode for the published mesh.
+    #   color              - use per-point colour from the pointcloud (default).
+    #   lambert            - Lambertian shading from surface normals.
+    #   lambert_color      - Lambertian shading with pointcloud colour.
+    #   normals            - encode normals as RGB.
+    #   height             - rainbow colour by Z height.
+    #   semantic           - colour by semantic label (requires labelled cloud).
+    #   semantic_probability - colour by label confidence.
+    #   ""                 - same as "color".
+    color_mode: color
+
+    # Minimum TSDF weight for a voxel to contribute vertices to the mesh.
+    # Increase to suppress noisy low-confidence surfaces.
+    mesh_min_weight: 1.0e-4
+
+    # Include per-vertex colour in the mesh. Disable for a monochrome mesh
+    # that is cheaper to publish and visualise.
+    mesh_use_color: true
+
+    # -------------------------------------------------------
+    # Map publishing timers
+    # -------------------------------------------------------
+
+    # Interval (seconds) between map layer publish calls.
+    publish_map_every_n_sec: 1.0
+
+    # Publish the serialised TSDF layer on the tsdf_map_out topic. Required if
+    # another node needs to receive the TSDF (e.g. a planner).
+    publish_tsdf_map: false
+
+    # Publish the serialised ESDF layer on the esdf_map_out topic.
+    publish_esdf_map: false
+
+    # -------------------------------------------------------
+    # Visualisation output
+    # -------------------------------------------------------
+
+    # Publish TSDF / ESDF / surface pointclouds after every mesh update cycle.
+    # Set true for live visualisation; false reduces CPU and bandwidth.
+    publish_pointclouds: true
+
+    # Publish pointclouds immediately after every integrated frame rather than
+    # on the mesh update timer. Increases CPU load significantly.
+    publish_pointclouds_on_update: false
+
+    # Publish horizontal TSDF and ESDF slice pointclouds.
+    publish_slices: true
+
+    # Z height (metres, in world_frame) of the horizontal slice published when
+    # publish_slices is true.
+    slice_level: 0.5
+
+    # Publish a pointcloud of all voxels that are farther from the nearest
+    # surface than traversability_radius.
+    publish_traversable: false
+
+    # Clearance distance (metres) used to compute the traversable voxel cloud.
     traversability_radius: 1.0
+
+    # Colourmap applied to intensity values in pointcloud output.
+    #   rainbow / inverse_rainbow / grayscale / inverse_grayscale / ironbow
+    intensity_colormap: rainbow
+
+    # Maximum intensity value mapped to the top of the colourmap. Values above
+    # this are clamped.
+    intensity_max_value: 100.0
+
+    # Remove TSDF and ESDF blocks that are farther than this distance (metres)
+    # from the current sensor position. Limits memory growth for long runs.
+    # 1000000.0 is effectively unlimited.
+    max_block_distance_from_body: 1000000.0
+
+    # -------------------------------------------------------
+    # Planning support
+    # -------------------------------------------------------
+
+    # Clear a sphere of ESDF voxels around the current robot position on every
+    # new pose callback. Useful for planners that need the robot's local volume
+    # to be free. Requires clear_sphere_radius to be set in the ESDF integrator.
+    clear_sphere_for_planning: false
+
+    # -------------------------------------------------------
+    # ESDF accuracy evaluation (development tool)
+    # -------------------------------------------------------
+
+    # Enable periodic ESDF accuracy evaluation against the occupancy map.
+    # Writes RMSE/MAE to console and publishes an error-slice pointcloud.
     eval_esdf_on: false
+
+    # Interval (seconds) between ESDF evaluation calls.
     eval_esdf_every_n_sec: 100.0
 
-    publish_robot_model: false
-    robot_model_file: ""
-    robot_model_scale: 1.0
-    verbose: true
-    timing: false
+    # -------------------------------------------------------
+    # Robot model visualisation
+    # -------------------------------------------------------
 
-    T_B_D: [1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0]
-    T_B_C: [1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0]
+    # Publish a 3D mesh marker showing the robot at its current pose.
+    publish_robot_model: false
+
+    # Absolute path to a mesh file (e.g. .dae or .stl) for the robot model.
+    # Only used when publish_robot_model is true. Empty = no model.
+    robot_model_file: ""
+
+    # Uniform scale applied to the robot model mesh.
+    robot_model_scale: 1.0
+
+    # -------------------------------------------------------
+    # ICP pose refinement (disabled by default)
+    # -------------------------------------------------------
+
+    # Enable iterative closest point refinement of the sensor pose against the
+    # existing TSDF map before integration. Improves accuracy when odometry
+    # is noisy but adds latency per frame.
+    enable_icp: false
+
+    # Accumulate ICP corrections across frames (odometry-style drift
+    # correction). If false, each frame is refined independently.
+    accumulate_icp_corrections: true
+
+    # TF frame broadcast for the ICP-corrected sensor pose.
+    # Only used when enable_icp is true.
+    # icp_corrected_frame: icp_corrected
+
+    # TF frame broadcast for the pose-corrected odometry frame.
+    # Only used when enable_icp is true.
+    # pose_corrected_frame: pose_corrected
+
+    # Minimum fraction of ICP correspondences that must match for an ICP
+    # update to be accepted.
+    # icp_min_match_ratio: 0.8
+
+    # Fraction of correspondences to keep during ICP subsampling.
+    # Lower values are faster but less accurate.
+    # icp_subsample_keep_ratio: 0.5
+
+    # Number of correspondences processed per ICP mini-batch iteration.
+    # icp_mini_batch_size: 20
+
+    # Refine roll and pitch in addition to yaw and translation. Disable for
+    # ground robots with a good IMU supplying roll/pitch.
+    # icp_refine_roll_pitch: false
+
+    # Regularisation weight on translation during ICP optimisation.
+    # Higher values penalise large corrections more strongly.
+    # icp_inital_translation_weighting: 100.0
+
+    # Regularisation weight on rotation during ICP optimisation.
+    # icp_inital_rotation_weighting: 100.0
+
+    # -------------------------------------------------------
+    # Map file output
+    # -------------------------------------------------------
+
+    # Output path for the PLY mesh file written by the generate_mesh service.
+    # Empty = do not write a file. Absolute path required.
+    # mesh_filename: /tmp/voxfield_mesh.ply
+
+    # -------------------------------------------------------
+    # Model transform (always active; used for robot mesh visualisation)
+    # -------------------------------------------------------
+
+    # Camera-to-horizontal-camera transform. Applied to the sensor pose when
+    # rendering the robot mesh marker. Identity = no extra rotation.
     T_C_CH: [1.0, 0.0, 0.0, 0.0,
              0.0, 1.0, 0.0, 0.0,
              0.0, 0.0, 1.0, 0.0,
              0.0, 0.0, 0.0, 1.0]
+
+    # Invert the T_C_CH matrix before applying.
+    # invert_T_C_CH: false
+
+    # -------------------------------------------------------
+    # Static calibration transforms (only used when use_tf_transforms: false)
+    # -------------------------------------------------------
+    # When use_tf_transforms is false the server subscribes to the /transform
+    # topic for the dynamic part of the sensor pose and combines it with the
+    # static calibration below. Both T_B_D and T_B_C must be provided.
+    # These parameters are ignored when use_tf_transforms is true.
+
+    # Body-to-dynamic-frame transform (row-major 4×4 homogeneous matrix).
+    # T_B_D: [1.0, 0.0, 0.0, 0.0,
+    #         0.0, 1.0, 0.0, 0.0,
+    #         0.0, 0.0, 1.0, 0.0,
+    #         0.0, 0.0, 0.0, 1.0]
+
+    # Invert T_B_D before use (set true if calibration provides T_D_B).
+    # invert_T_B_D: false
+
+    # Body-to-camera/sensor transform (row-major 4×4 homogeneous matrix).
+    # T_B_C: [1.0, 0.0, 0.0, 0.0,
+    #         0.0, 1.0, 0.0, 0.0,
+    #         0.0, 0.0, 1.0, 0.0,
+    #         0.0, 0.0, 0.0, 1.0]
+
+    # Invert T_B_C before use (set true if calibration provides T_C_B).
+    # invert_T_B_C: false

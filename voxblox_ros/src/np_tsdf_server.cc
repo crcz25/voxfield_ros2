@@ -442,7 +442,8 @@ void NpTsdfServer::publishRobotMesh(const Transformation& T_G_C) {
 bool NpTsdfServer::getNextPointcloudFromQueue(
     std::queue<sensor_msgs::msg::PointCloud2::SharedPtr>* queue,
     sensor_msgs::msg::PointCloud2::SharedPtr* pointcloud_msg, Transformation* T_G_C) {
-  const size_t kMaxQueueSize = 10;
+  const size_t max_queue_size =
+      std::max<size_t>(1u, static_cast<size_t>(pointcloud_queue_size_));
   if (queue->empty()) {
     return false;
   }
@@ -454,13 +455,13 @@ bool NpTsdfServer::getNextPointcloudFromQueue(
     queue->pop();
     return true;
   } else {
-    if (queue->size() >= kMaxQueueSize) {
+    if (queue->size() >= max_queue_size) {
       ROS_ERROR_THROTTLE(
           60,
           "Input pointcloud queue getting too long! Dropping "
           "some pointclouds. Either unable to look up transform "
           "timestamps or the processing is taking too long.");
-      while (queue->size() >= kMaxQueueSize) {
+      while (queue->size() >= max_queue_size) {
         queue->pop();
       }
     }
